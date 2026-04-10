@@ -22,13 +22,18 @@
 
   function detectMeeting() {
     // Check if we're in an active Google Meet call
-    // Look for the meeting UI elements
-    const meetingContainer = document.querySelector('[data-meeting-code]') ||
-                              document.querySelector('[data-unresolved-meeting-id]') ||
-                              document.querySelector('.crqnQb') || // Meeting area
-                              document.querySelector('[jsname="ME4pFe"]'); // Call joined indicator
+    // Primary indicator: the "Leave call" button only exists when connected to a call
+    const leaveCallBtn = document.querySelector('button[aria-label="Leave call"]');
+    // Fallback: check for other in-call indicators
+    const inCallIndicator = leaveCallBtn ||
+                             document.querySelector('[data-meeting-code]') ||
+                             document.querySelector('[data-unresolved-meeting-id]');
 
-    if (meetingContainer && !meetingDetected) {
+    // Also verify we're on a valid meeting URL (xxx-xxxx-xxx pattern)
+    const url = window.location.href;
+    const isMeetUrl = /meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/.test(url);
+
+    if (inCallIndicator && isMeetUrl && !meetingDetected) {
       meetingDetected = true;
       meetingId = extractMeetingId();
       
@@ -164,33 +169,35 @@
     overlay.innerHTML = `
       <div class="mc-brief-card">
         <div class="mc-brief-header">
-          <div class="mc-brief-icon">🧠</div>
+          <div class="mc-brief-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>
+          </div>
           <div class="mc-brief-title">AI Meeting Copilot</div>
           <button class="mc-brief-close" id="mc-close-brief">✕</button>
         </div>
         <div class="mc-brief-greeting">${briefContent.greeting || `Hey ${targetName} 👋`}</div>
         <div class="mc-brief-text">${briefContent.briefing || "Here's what you missed:"}</div>
         <div class="mc-brief-section">
-          <div class="mc-brief-label">📋 Topics Discussed</div>
+          <div class="mc-brief-label"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:6px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg> Topics Discussed</div>
           <ul class="mc-brief-list">
             ${(briefContent.topicsSummary || []).map(t => `<li>${t}</li>`).join('')}
           </ul>
         </div>
         ${(briefContent.keyDecisions || []).length > 0 ? `
           <div class="mc-brief-section">
-            <div class="mc-brief-label">✅ Key Decisions</div>
+            <div class="mc-brief-label"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:6px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> Key Decisions</div>
             <ul class="mc-brief-list">
               ${briefContent.keyDecisions.map(d => `<li>${d}</li>`).join('')}
             </ul>
           </div>
         ` : ''}
         <div class="mc-brief-section">
-          <div class="mc-brief-label">🎯 Current Discussion</div>
+          <div class="mc-brief-label"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:6px"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg> Current Discussion</div>
           <div class="mc-brief-current">${briefContent.currentDiscussion || 'N/A'}</div>
         </div>
         ${(briefContent.actionItemsForThem || []).length > 0 ? `
           <div class="mc-brief-section">
-            <div class="mc-brief-label">📌 Action Items</div>
+            <div class="mc-brief-label"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:6px"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M12 11h4"></path><path d="M12 16h4"></path><path d="M8 11h.01"></path><path d="M8 16h.01"></path></svg> Action Items</div>
             <ul class="mc-brief-list">
               ${briefContent.actionItemsForThem.map(a => `<li>${a}</li>`).join('')}
             </ul>
@@ -233,7 +240,9 @@
     btn.innerHTML = `
       <div class="mc-float-btn-inner">
         <div class="mc-float-pulse"></div>
-        <div class="mc-float-icon">🧠</div>
+        <div class="mc-float-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>
+        </div>
       </div>
       <div class="mc-float-label">AI Copilot</div>
     `;
@@ -252,30 +261,34 @@
 
   // ——— Meeting End Detection ———
   function detectMeetingEnd() {
-    // Check for "You left the meeting" or "Return to home screen" buttons
-    const leftIndicators = document.querySelectorAll(
-      '[data-call-ended],' +
-      '.CRFCdf,' + // "Return to home screen"
-      '[jsname="WIVZEd"]' // Left meeting screen
-    );
-    
-    if (meetingDetected && (leftIndicators.length > 0 || !document.querySelector('[data-meeting-code]'))) {
-      // Additional check: if we're on the meeting-ended page
-      const rejoinBtn = document.querySelector('[jsname="oI7Fj"]');
-      if (rejoinBtn && meetingDetected) {
-        meetingDetected = false;
-        
-        chrome.runtime.sendMessage({ type: 'MEETING_ENDED' });
-        
-        if (participantPollInterval) {
-          clearInterval(participantPollInterval);
-          participantPollInterval = null;
-        }
-        
-        // Remove floating button
-        const btn = document.getElementById('mc-float-btn');
-        if (btn) btn.remove();
+    if (!meetingDetected) return;
+
+    // Primary check: "Leave call" button disappears when you leave
+    const leaveCallBtn = document.querySelector('button[aria-label="Leave call"]');
+
+    // Secondary checks: explicit "you left" indicators
+    const youLeftText = document.body.innerText.includes('You left the meeting');
+    const rejoinBtn = document.querySelector('[jsname="oI7Fj"]');
+    const returnHomeBtn = document.querySelector('.CRFCdf');
+    const callEndedIndicator = document.querySelector('[data-call-ended]');
+
+    const meetingEnded = !leaveCallBtn &&
+      (youLeftText || rejoinBtn || returnHomeBtn || callEndedIndicator);
+
+    if (meetingEnded) {
+      meetingDetected = false;
+      console.log(`${COPILOT_PREFIX} Meeting ended`);
+      
+      chrome.runtime.sendMessage({ type: 'MEETING_ENDED' });
+      
+      if (participantPollInterval) {
+        clearInterval(participantPollInterval);
+        participantPollInterval = null;
       }
+      
+      // Remove floating button
+      const btn = document.getElementById('mc-float-btn');
+      if (btn) btn.remove();
     }
   }
 
