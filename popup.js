@@ -217,11 +217,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (state.topics && state.topics.length > 0) {
         topicsList.innerHTML = state.topics.map(t => `
           <div class="topic-item">
-            <div class="topic-dot ${t.status || 'active'}"></div>
-            <span class="topic-name">${t.name}</span>
-            <span class="topic-status ${t.status || 'active'}">${t.status || 'active'}</span>
+            <div class="topic-dot ${sanitizeTopicStatus(t.status)}"></div>
+            <span class="topic-name">${escapeHtml(t.name || '')}</span>
+            <span class="topic-status ${sanitizeTopicStatus(t.status)}">${escapeHtml(t.status || 'active')}</span>
           </div>
         `).join('');
+      } else {
+        topicsList.innerHTML = '<div class="empty-state">No topics detected yet</div>';
       }
       
       const lateSection = document.getElementById('late-joiners-section');
@@ -231,10 +233,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         lateList.innerHTML = state.lateJoiners.map(name => `
           <div class="late-joiner-item">
             <span class="joiner-icon">🚪</span>
-            <span class="joiner-name">${name}</span>
+            <span class="joiner-name">${escapeHtml(name || '')}</span>
             <span style="color: #64748B; font-size: 10px;">briefed ✓</span>
           </div>
         `).join('');
+      } else {
+        lateSection.style.display = 'none';
+        lateList.innerHTML = '';
       }
     } else {
       meetingSection.style.display = 'none';
@@ -262,6 +267,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   function getSentimentEmoji(sentiment) {
     const map = { positive: '😊', negative: '😟', neutral: '😐', mixed: '🤔' };
     return map[sentiment] || '—';
+  }
+
+  function sanitizeTopicStatus(status) {
+    return status === 'completed' ? 'completed' : 'active';
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value || '');
+    return div.innerHTML;
   }
 
   function shakeElement(el) {

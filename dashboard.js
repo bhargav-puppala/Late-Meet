@@ -114,6 +114,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       statusDot.classList.remove('active');
       statusText.textContent = 'No active meeting';
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
     }
 
     // Summary
@@ -176,7 +180,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       list.innerHTML = '<li class="empty-msg">Insights will appear as the conversation progresses</li>';
       return;
     }
-    list.innerHTML = insights.map(i => `<li>${i}</li>`).join('');
+    list.innerHTML = insights.map(i => `<li>${escapeHtml(i || '')}</li>`).join('');
   }
 
   // ——— Topics ———
@@ -188,12 +192,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     container.innerHTML = topics.map(t => `
       <div class="topic-full-item">
-        <div class="topic-full-dot ${t.status || 'active'}"></div>
+        <div class="topic-full-dot ${sanitizeTopicStatus(t.status)}"></div>
         <div class="topic-full-info">
-          <div class="topic-full-name">${t.name}</div>
-          <div class="topic-full-meta">${t.duration || ''} ${t.startTime ? `• Started ${t.startTime}` : ''}</div>
+          <div class="topic-full-name">${escapeHtml(t.name || '')}</div>
+          <div class="topic-full-meta">${escapeHtml(t.duration || '')} ${t.startTime ? `• Started ${escapeHtml(t.startTime)}` : ''}</div>
         </div>
-        <span class="topic-full-badge ${t.status || 'active'}">${t.status || 'active'}</span>
+        <span class="topic-full-badge ${sanitizeTopicStatus(t.status)}">${escapeHtml(t.status || 'active')}</span>
       </div>
     `).join('');
   }
@@ -207,8 +211,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     container.innerHTML = decisions.map(d => `
       <div class="decision-item">
-        <div class="decision-text">${d.text}</div>
-        <div class="decision-meta">${d.by ? `By ${d.by}` : ''} ${d.timestamp ? `• ${d.timestamp}` : ''}</div>
+        <div class="decision-text">${escapeHtml(d.text || '')}</div>
+        <div class="decision-meta">${d.by ? `By ${escapeHtml(d.by)}` : ''} ${d.timestamp ? `• ${escapeHtml(d.timestamp)}` : ''}</div>
       </div>
     `).join('');
   }
@@ -224,9 +228,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="action-item">
         <div class="action-check"></div>
         <div class="action-info">
-          <div class="action-task">${a.task}</div>
-          ${a.owner ? `<span class="action-owner"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${a.owner}</span>` : ''}
-          ${a.deadline ? `<div class="action-deadline"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>${a.deadline}</div>` : ''}
+          <div class="action-task">${escapeHtml(a.task || '')}</div>
+          ${a.owner ? `<span class="action-owner"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(a.owner)}</span>` : ''}
+          ${a.deadline ? `<div class="action-deadline"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>${escapeHtml(a.deadline)}</div>` : ''}
         </div>
       </div>
     `).join('');
@@ -242,11 +246,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     container.innerHTML = participants.map(name => {
       const isLate = lateJoiners?.includes(name);
-      const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+      const safeName = escapeHtml(name || '');
+      const initials = safeName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
       return `
         <div class="participant-item">
           <div class="participant-avatar">${initials}</div>
-          <span class="participant-name">${name}</span>
+          <span class="participant-name">${safeName}</span>
           <span class="participant-tag ${isLate ? 'late' : 'original'}">
             ${isLate ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" x2="3" y1="12" y2="12"></line></svg>Late' : 'Original'}
           </span>
@@ -262,7 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       lateList.innerHTML = lateJoiners.map(name => `
         <div class="late-joiner-card-item">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="color: #A3A3A3;"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" x2="3" y1="12" y2="12"></line></svg>
-          <span style="font-weight: 500; color: #FAFAFA;">${name}</span>
+          <span style="font-weight: 500; color: #FAFAFA;">${escapeHtml(name || '')}</span>
           <span style="margin-left: auto; color: #737373; font-size: 11px;">
             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>Brief sent
           </span>
@@ -287,7 +292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="timeline-item">
           <div class="timeline-marker">${icon}</div>
           <div class="timeline-info">
-            <div class="timeline-event">${entry.event}</div>
+            <div class="timeline-event">${escapeHtml(entry.event || '')}</div>
             <div class="timeline-time">${formatDuration(entry.elapsed || 0)} elapsed</div>
           </div>
         </div>
@@ -296,12 +301,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getTimelineIcon(event) {
+    const label = String(event || '');
     const iconBase = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon">';
-    if (event.includes('started')) return iconBase + '<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>';
-    if (event.includes('ended')) return iconBase + '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 12h6"></path></svg>';
-    if (event.includes('joined')) return iconBase + '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" x2="3" y1="12" y2="12"></line></svg>';
-    if (event.includes('Topic')) return iconBase + '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
-    if (event.includes('Decision')) return iconBase + '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+    if (label.includes('started')) return iconBase + '<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>';
+    if (label.includes('ended')) return iconBase + '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 12h6"></path></svg>';
+    if (label.includes('joined')) return iconBase + '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" x2="3" y1="12" y2="12"></line></svg>';
+    if (label.includes('Topic')) return iconBase + '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+    if (label.includes('Decision')) return iconBase + '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
     return iconBase + '<line x1="12" x2="12" y1="20" y2="4"></line><line x1="6" x2="18" y1="20" y2="20"></line><line x1="14" x2="14" y1="4" y2="10"></line></svg>';
   }
 
@@ -394,6 +400,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     return div.innerHTML;
   }
 
+  function sanitizeTopicStatus(status) {
+    return status === 'completed' ? 'completed' : 'active';
+  }
+
   function formatDuration(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -422,14 +432,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="session-item" data-session-id="${s.id}">
             <div class="session-item-header">
               <div>
-                <div class="session-item-date">${date} at ${time}</div>
-                <div class="session-item-id">${s.meetingId || 'Unknown Meeting'}</div>
+                <div class="session-item-date">${escapeHtml(date)} at ${escapeHtml(time)}</div>
+                <div class="session-item-id">${escapeHtml(s.meetingId || 'Unknown Meeting')}</div>
               </div>
               <div class="session-item-meta">
                 <span>${formatDuration(s.duration || 0)}</span>
               </div>
             </div>
-            <div class="session-item-summary">${s.summary || 'No summary available'}</div>
+            <div class="session-item-summary">${escapeHtml(s.summary || 'No summary available')}</div>
             <div class="session-item-stats">
               <span>${topicCount} topics</span>
               <span>${decisionCount} decisions</span>

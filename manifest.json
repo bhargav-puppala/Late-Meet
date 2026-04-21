@@ -1,13 +1,55 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Late Meet",
-  "version": "1.0",
-  "description": "A Chrome extension for scheduling meetings",
-  "content_scripts": [
-    "content.js"
-  ],
+  "version": "1.0.1",
+  "description": "AI meeting copilot for Google Meet with local-first transcription and summaries",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "tabCapture",
+    "offscreen",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://api.openai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "side_panel": {
+    "default_path": "dashboard.html"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Late Meet"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content.css"
+      ],
+      "matches": [
+        "https://meet.google.com/*"
+      ]
+    }
   ]
 }
