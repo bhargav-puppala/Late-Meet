@@ -130,20 +130,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   copilotBtn?.addEventListener('click', () => handleStartAudio(copilotBtn));
+  document.getElementById('meeting-start-audio-btn')?.addEventListener('click', (e) => handleStartAudio(e.currentTarget));
 
   function setCopilotActive(active) {
     if (!copilotBtn) return;
+    const miniBtn = document.getElementById('meeting-start-audio-btn');
     const iconEl = copilotBtn.querySelector('.copilot-btn-icon');
+    
     if (active) {
       copilotBtn.classList.add('active');
       copilotBtn.querySelector('.copilot-btn-text').textContent = 'Copilot Active';
       iconEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
       copilotBtn.disabled = true;
+      if (miniBtn) miniBtn.style.display = 'none';
     } else {
       copilotBtn.classList.remove('active');
       copilotBtn.querySelector('.copilot-btn-text').textContent = 'Start Copilot';
       iconEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>';
       copilotBtn.disabled = false;
+      if (miniBtn) miniBtn.style.display = 'flex';
     }
   }
 
@@ -214,7 +219,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       const badge = document.getElementById('status-badge');
       badge.className = 'status-badge active';
-      badge.querySelector('.status-text').textContent = 'Recording...';
+      badge.querySelector('.status-text').textContent = state.audioActive ? 'Recording...' : 'Meeting active';
       
       document.getElementById('meeting-id').textContent = state.meetingId || '—';
       

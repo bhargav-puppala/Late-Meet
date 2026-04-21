@@ -303,6 +303,32 @@ body::-webkit-scrollbar-thumb {
   border: 1px solid #262626;
 }
 
+.mini-copilot-btn {
+  margin-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #FFFFFF;
+  color: #000000;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mini-copilot-btn:hover {
+  background: #E5E5E5;
+  transform: scale(0.98);
+}
+
+.mini-copilot-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* ——— Cards ——— */
 .card {
   margin: 16px;
