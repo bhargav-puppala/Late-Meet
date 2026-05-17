@@ -35,8 +35,5 @@ export function audioFileExtensionForMimeType(mimeType: string) {
 }
 
 export function isChunkViable(blob: Blob, minBytes = 15000): boolean {
-  if (!blob || blob.size < minBytes) {
-    return false;
-  }
-  return true;
+  return !!blob && blob.size >= minBytes;
 }
