@@ -37,6 +37,20 @@ initTheme();
       'div[jsname="NfX98"]', // Common class for names on video tiles
       '[aria-label^="Participant:"]', // Tile aria-labels
     ],
+    participantTile: [
+      "[data-participant-id]",
+      '[aria-label^="Participant:"]',
+      "[data-self-name]",
+      '[role="listitem"]',
+      '[role="gridcell"]',
+    ],
+    activeSpeakerIndicators: [
+      '[aria-label*="speaking" i]',
+      '[data-tooltip*="speaking" i]',
+      '[data-is-speaking="true"]',
+      '[data-speaking="true"]',
+      '[data-active-speaker="true"]',
+    ],
     showEveryoneBtn: '[aria-label*="Show everyone"]',
   };
 
@@ -55,6 +69,57 @@ initTheme();
     if (!el) return "";
     if ("value" in el) return String((el as HTMLInputElement).value || "").trim();
     return String(el.textContent || "").trim();
+  }
+
+  function closestParticipantTile(el: Element): HTMLElement | null {
+    for (const selector of SELECTORS.participantTile) {
+      const tile = el.closest(selector);
+      if (tile) return tile as HTMLElement;
+    }
+
+    return null;
+  }
+
+  function classListIncludesSpeakingCue(el: Element): boolean {
+    const className = String(el.getAttribute("class") || "");
+    return /\b(active[-_\s]?speaker|speaking|is[-_\s]?speaking|voice[-_\s]?active)\b/i.test(
+      className,
+    );
+  }
+
+  function hasActiveSpeakerCue(el: Element): boolean {
+    const ariaLabel = String(el.getAttribute("aria-label") || "");
+    if (/\bspeaking\b/i.test(ariaLabel)) return true;
+
+    if (
+      el.getAttribute("data-is-speaking") === "true" ||
+      el.getAttribute("data-speaking") === "true" ||
+      el.getAttribute("data-active-speaker") === "true"
+    ) {
+      return true;
+    }
+
+    if (classListIncludesSpeakingCue(el)) return true;
+
+    return SELECTORS.activeSpeakerIndicators.some((selector) =>
+      Boolean(el.querySelector(selector)),
+    );
+  }
+
+  function participantNameFromTile(tile: HTMLElement): string | null {
+    const directName = participantNameFromCandidate({
+      ariaLabel: tile.getAttribute("aria-label"),
+      selfName: tile.getAttribute("data-self-name"),
+      text: getTextValue(tile),
+    });
+    if (directName) return directName;
+
+    const nameElement = queryFirst(SELECTORS.participantNodes, tile);
+    return participantNameFromCandidate({
+      ariaLabel: nameElement?.getAttribute("aria-label"),
+      selfName: nameElement?.getAttribute("data-self-name"),
+      text: getTextValue(nameElement),
+    });
   }
 
   function setInputValue(el: HTMLElement, value: string) {
@@ -218,6 +283,9 @@ initTheme();
   }
 
   let participantPollTimer: number | NodeJS.Timeout | null = null;
+  let activeSpeakerObserver: MutationObserver | null = null;
+  let activeSpeakerCheckTimer: number | NodeJS.Timeout | null = null;
+  let lastActiveSpeakerName: string | null = null;
 
   function startParticipantPolling() {
     if (participantPollTimer) return;
@@ -235,6 +303,104 @@ initTheme();
         // Service worker idle
       }
     }, 5000);
+  }
+
+  function scheduleActiveSpeakerCheck() {
+    if (activeSpeakerCheckTimer) return;
+
+    activeSpeakerCheckTimer = setTimeout(() => {
+      activeSpeakerCheckTimer = null;
+      detectActiveSpeaker();
+    }, 250);
+  }
+
+  async function publishActiveSpeaker(name: string) {
+    if (name === lastActiveSpeakerName) return;
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: "ACTIVE_SPEAKER_CHANGED",
+        name,
+      });
+      lastActiveSpeakerName = name;
+    } catch {
+      // Service worker idle
+    }
+  }
+
+  function detectActiveSpeaker() {
+    const candidates = new Set<HTMLElement>();
+
+    SELECTORS.activeSpeakerIndicators.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        const tile = closestParticipantTile(node);
+        if (tile) candidates.add(tile);
+      });
+    });
+
+    document.querySelectorAll(SELECTORS.participantTile.join(",")).forEach((node) => {
+      const element = node as HTMLElement;
+      if (hasActiveSpeakerCue(element)) {
+        candidates.add(element);
+      }
+    });
+
+    for (const tile of candidates) {
+      const name = participantNameFromTile(tile);
+      if (name) {
+        void publishActiveSpeaker(name);
+        return;
+      }
+    }
+  }
+
+  function startActiveSpeakerDetection() {
+    if (activeSpeakerObserver) return;
+
+    function isSpeakerRelatedNode(node: Node): boolean {
+      if (!(node instanceof Element)) return false;
+      return (
+        Boolean(closestParticipantTile(node)) ||
+        node.matches(SELECTORS.activeSpeakerIndicators.join(",")) ||
+        Boolean(node.querySelector(SELECTORS.activeSpeakerIndicators.join(",")))
+      );
+    }
+
+    activeSpeakerObserver = new MutationObserver((mutations) => {
+      const sawSpeakerRelatedChange = mutations.some((mutation) => {
+        if (mutation.type === "childList") {
+          return (
+            isSpeakerRelatedNode(mutation.target) ||
+            Array.from(mutation.addedNodes).some(isSpeakerRelatedNode) ||
+            Array.from(mutation.removedNodes).some(isSpeakerRelatedNode)
+          );
+        }
+        if (mutation.type !== "attributes") return false;
+
+        const name = mutation.attributeName || "";
+        return (
+          name === "class" || name === "style" || name === "aria-label" || name.startsWith("data-")
+        );
+      });
+
+      if (sawSpeakerRelatedChange) scheduleActiveSpeakerCheck();
+    });
+
+    activeSpeakerObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: [
+        "class",
+        "style",
+        "aria-label",
+        "data-is-speaking",
+        "data-speaking",
+        "data-active-speaker",
+      ],
+      childList: true,
+      subtree: true,
+    });
+
+    detectActiveSpeaker();
   }
 
   function injectFloatingButton() {
@@ -339,6 +505,7 @@ initTheme();
   });
 
   startParticipantPolling();
+  startActiveSpeakerDetection();
   if (window.location.pathname.length > 5 && !window.location.pathname.includes("/_")) {
     injectFloatingButton();
   }
