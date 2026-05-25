@@ -37,6 +37,7 @@ const state: State = {
   timeline: [],
   transcript: [],
   audioActive: false,
+  currentSpeaker: null,
   targetTabId: null,
   lastSummarizedAt: 0,
   pendingJoiners: new Set(),
@@ -44,6 +45,9 @@ const state: State = {
 };
 
 let selfParticipantName: string | null = null;
+let activeSpeakerName: string | null = null;
+let activeSpeakerUpdatedAt = 0;
+const ACTIVE_SPEAKER_TTL_MS = 15000;
 
 function normalizeParticipantName(value: string | null | undefined): string {
   return String(value || "")
@@ -70,11 +74,14 @@ function resetState() {
   state.timeline = [];
   state.transcript = [];
   state.audioActive = false;
+  state.currentSpeaker = null;
   state.targetTabId = null;
   state.lastSummarizedAt = 0;
   state.pendingJoiners.clear();
   state.participantCount = 0;
   selfParticipantName = null;
+  activeSpeakerName = null;
+  activeSpeakerUpdatedAt = 0;
 }
 
 function addTimeline(event: string) {
@@ -110,8 +117,17 @@ function snapshot() {
     timeline: state.timeline,
     transcript: state.transcript,
     audioActive: state.audioActive,
+    currentSpeaker: state.currentSpeaker,
     participantCount: state.participantCount,
   };
+}
+
+function getSpeakerForCurrentChunk(): string {
+  if (activeSpeakerName && Date.now() - activeSpeakerUpdatedAt <= ACTIVE_SPEAKER_TTL_MS) {
+    return activeSpeakerName;
+  }
+
+  return "Audio";
 }
 
 async function broadcastStateUpdate() {
@@ -910,6 +926,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
+        const chunkSpeaker = getSpeakerForCurrentChunk();
         const base64Len = message.audioBase64?.length ?? 0;
         const approxBytes = Math.round((base64Len * 3) / 4);
         console.log(
@@ -923,7 +940,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log(`[LateMeet] transcript received — ${rawText.length} chars`);
             const refinedText = await refineTranscription(rawText);
             console.log(`[LateMeet] transcript refined — ${refinedText.length} chars`);
-            state.transcript.push({ speaker: "Audio", text: refinedText, timestamp: Date.now() });
+            state.transcript.push({
+              speaker: chunkSpeaker,
+              text: refinedText,
+              timestamp: Date.now(),
+            });
             await summarizeTranscriptIfNeeded();
             await broadcastStateUpdate();
           } else {
@@ -934,6 +955,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.error("[LateMeet] chunk processing failed:", err);
           sendResponse({ success: false, error: (err as Error).message });
         }
+        return;
+      }
+
+      case "ACTIVE_SPEAKER_CHANGED": {
+        const speaker = typeof message.name === "string" ? message.name.trim() : "";
+
+        if (!speaker) {
+          sendResponse({ success: false, error: "speaker name is required" });
+          return;
+        }
+
+        activeSpeakerName = speaker;
+        activeSpeakerUpdatedAt = Date.now();
+        state.currentSpeaker = speaker;
+        sendResponse({ success: true });
         return;
       }
 
