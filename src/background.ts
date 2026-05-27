@@ -2,9 +2,6 @@
 
 import { State } from "./types";
 import { audioFileExtensionForMimeType, isChunkViable } from "./audioProcessing";
-import { initTheme } from "./theme.js";
-
-initTheme();
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions";
@@ -55,7 +52,6 @@ class ApiTransactionManager {
    * Tasks that have been dequeued but are waiting for their retry alarm to
    * fire live here so findRetryEntry() can locate them later.
    */
-
   private retryingTasks = new Map<string, QueueEntry<any>>();
 
   private processing = false;
@@ -170,7 +166,7 @@ class ApiTransactionManager {
     // Honour HTTP status codes embedded in thrown Error messages.
     if (err instanceof Error) {
       for (const status of ApiTransactionManager.RETRYABLE_STATUSES) {
-        if (err.message.includes(String(status))) return true;
+        if (new RegExp(`\\b${status}\\b`).test(err.message)) return true;
       }
     }
     return false;
@@ -189,10 +185,6 @@ const apiQueue = new ApiTransactionManager();
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-import { ActionItem, Decision, State } from "./types";
-import { audioFileExtensionForMimeType, isChunkViable } from "./audioProcessing";
-import { getElevenLabsApiKey, getOpenAiApiKey } from "./utils/credentials";
-import { resolveDetectedMeetTab } from "./meetingTabs";
 
 const state: State = {
   isActive: false,
@@ -213,7 +205,6 @@ const state: State = {
   timeline: [],
   transcript: [],
   audioActive: false,
-  currentSpeaker: null,
   targetTabId: null,
   lastSummarizedAt: 0,
   pendingJoiners: new Set(),
@@ -221,10 +212,6 @@ const state: State = {
 };
 
 let selfParticipantName: string | null = null;
-const notifiedActionItems = new Set<string>();
-let activeSpeakerName: string | null = null;
-let activeSpeakerUpdatedAt = 0;
-const ACTIVE_SPEAKER_TTL_MS = 15000;
 
 function normalizeParticipantName(value: string | null | undefined): string {
   return String(value || "")
@@ -251,15 +238,11 @@ function resetState() {
   state.timeline = [];
   state.transcript = [];
   state.audioActive = false;
-  state.currentSpeaker = null;
   state.targetTabId = null;
   state.lastSummarizedAt = 0;
   state.pendingJoiners.clear();
   state.participantCount = 0;
   selfParticipantName = null;
-  notifiedActionItems.clear();
-  activeSpeakerName = null;
-  activeSpeakerUpdatedAt = 0;
 }
 
 function addTimeline(event: string) {
@@ -295,17 +278,8 @@ function snapshot() {
     timeline: state.timeline,
     transcript: state.transcript,
     audioActive: state.audioActive,
-    currentSpeaker: state.currentSpeaker,
     participantCount: state.participantCount,
   };
-}
-
-function getSpeakerForCurrentChunk(): string {
-  if (activeSpeakerName && Date.now() - activeSpeakerUpdatedAt <= ACTIVE_SPEAKER_TTL_MS) {
-    return activeSpeakerName;
-  }
-
-  return "Audio";
 }
 
 async function broadcastStateUpdate() {
@@ -330,6 +304,11 @@ async function broadcastStateUpdate() {
   } catch {
     /* ignore */
   }
+}
+
+async function getApiKey() {
+  const result = await chrome.storage.session.get("openai_api_key");
+  return result.openai_api_key || null;
 }
 
 interface Settings {
@@ -358,66 +337,6 @@ function sanitizePromptText(value: string | null) {
     .replace(/```/g, "")
     .replace(/[<>{}]/g, " ")
     .slice(0, MAX_PROMPT_LENGTH);
-}
-
-function sanitizeOptionalField(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const sanitized = sanitizePromptText(value).trim();
-  return sanitized || undefined;
-}
-
-function normalizeDecisions(value: unknown, fallback: Decision[]): Decision[] {
-  if (!Array.isArray(value)) return fallback;
-
-  return value
-    .map((item) => {
-      if (typeof item === "string") {
-        const text = sanitizeOptionalField(item);
-        return text ? { text } : null;
-      }
-
-      if (item && typeof item === "object") {
-        const record = item as Record<string, unknown>;
-        const text = sanitizeOptionalField(record.text);
-        if (!text) return null;
-
-        return {
-          text,
-          by: sanitizeOptionalField(record.by),
-          timestamp: sanitizeOptionalField(record.timestamp),
-        };
-      }
-
-      return null;
-    })
-    .filter((item): item is Decision => Boolean(item));
-}
-
-function normalizeActionItems(value: unknown, fallback: ActionItem[]): ActionItem[] {
-  if (!Array.isArray(value)) return fallback;
-
-  return value
-    .map((item) => {
-      if (typeof item === "string") {
-        const task = sanitizeOptionalField(item);
-        return task ? { task } : null;
-      }
-
-      if (item && typeof item === "object") {
-        const record = item as Record<string, unknown>;
-        const task = sanitizeOptionalField(record.task);
-        if (!task) return null;
-
-        return {
-          task,
-          owner: sanitizeOptionalField(record.owner),
-          deadline: sanitizeOptionalField(record.deadline),
-        };
-      }
-
-      return null;
-    })
-    .filter((item): item is ActionItem => Boolean(item));
 }
 
 async function ensureOffscreenDocument() {
@@ -463,9 +382,9 @@ function getTranscriptionPrompt() {
 
 async function transcribeChunk(base64Audio: string, mimeType = "audio/webm", prompt = "") {
   // Single declaration — retrieved from session storage where ElevenLabs keys are stored.
-  // Use ElevenLabs API key if available, fallback to OpenAI if not?
-  // No, the requirement is to use ElevenLabs.
-  const elevenlabsKey = await getElevenLabsApiKey();
+  const elevenlabsKey = await chrome.storage.session
+    .get("elevenlabs_api_key")
+    .then((r) => r.elevenlabs_api_key);
 
   const bytes = Uint8Array.from(atob(base64Audio), (c) => c.charCodeAt(0));
   const blob = new Blob([bytes], { type: mimeType });
@@ -518,8 +437,6 @@ async function transcribeChunk(base64Audio: string, mimeType = "audio/webm", pro
 
   // Fallback to Whisper.
   const apiKey = await getApiKey();
-  // Fallback to Whisper
-  const apiKey = await getOpenAiApiKey();
   if (!apiKey) return null;
 
   const normalizedMime = mimeType.split(";")[0].trim();
@@ -557,7 +474,7 @@ async function refineTranscription(rawText: string) {
   const words = rawText.trim().split(/\s+/);
   if (words.length < 3) return rawText;
 
-  const apiKey = await getOpenAiApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) return rawText;
 
   const systemPrompt = `You are an expert AI transcription editor. 
@@ -616,12 +533,6 @@ Return ONLY the corrected transcript text. If the input is unclear, inaudible, o
 // ---------------------------------------------------------------------------
 // Single-flight guard for summarization
 // ---------------------------------------------------------------------------
-// Without this guard, concurrent OFFSCREEN_AUDIO_CHUNK handlers can all pass
-// the lastSummarizedAt interval check before any of them updates the value,
-// causing duplicate summarization requests and concurrent mutation of shared
-// state (summary, topics, decisions, …).  The flag is reset in `finally` so
-// a permanent API failure does not permanently block future summarizations.
-// ---------------------------------------------------------------------------
 let summaryInFlight = false;
 
 async function summarizeTranscriptIfNeeded() {
@@ -638,7 +549,7 @@ async function summarizeTranscriptIfNeeded() {
   const elapsed = Math.floor((Date.now() - lastSum) / 1000);
   if (lastSum > 0 && elapsed < intervalSeconds) return;
 
-  const apiKey = await getOpenAiApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) return;
 
   const transcriptWindow = state.transcript
@@ -672,38 +583,14 @@ async function summarizeTranscriptIfNeeded() {
     ];
 
     const systemPrompt = `You are a World-Class Meeting Intelligence Engine. 
-  const topicDetectionEnabled = isFeatureEnabled(settings, "topicDetection");
-  const decisionDetectionEnabled = isFeatureEnabled(settings, "decisionDetection");
-  const actionExtractionEnabled = isFeatureEnabled(settings, "actionExtraction");
-  const sentimentAnalysisEnabled = isFeatureEnabled(settings, "sentimentAnalysis");
-  const outputFields = [
-    '"summary": "Updated meeting summary..."',
-    ...(topicDetectionEnabled
-      ? [
-          '"topics": [{"name": "Topic", "status": "active|completed"}]',
-          '"currentTopic": "Identifying the current main topic"',
-        ]
-      : []),
-    ...(decisionDetectionEnabled
-      ? ['"decisions": [{"text": "Decision", "by": "optional speaker", "timestamp": "optional"}]']
-      : []),
-    ...(actionExtractionEnabled
-      ? ['"actionItems": [{"task": "Action", "owner": "optional owner", "deadline": "optional"}]']
-      : []),
-    ...(sentimentAnalysisEnabled ? ['"sentiment": "positive|neutral|negative|mixed"'] : []),
-    '"keyInsights": ["Insight 1", ...]',
-    '"questionsRaised": ["Question 1", ...]',
-  ];
-
-  const systemPrompt = `You are a World-Class Meeting Intelligence Engine. 
 Your goal is to extract high-fidelity insights from meeting transcripts.
 
 OUTPUT GUIDELINES:
 - Provide a concise yet professional summary (business grade).
 - Extract only the fields requested by the user prompt.
 ${topicDetectionEnabled ? "- Identify distinct topics and their statuses (active/completed)." : ""}
-${decisionDetectionEnabled ? '- Precisely capture decisions as objects with a required "text" field and optional "by" and "timestamp" fields.' : ""}
-${actionExtractionEnabled ? '- Precisely capture action items as objects with a required "task" field and optional "owner" and "deadline" fields.' : ""}
+${decisionDetectionEnabled ? "- Precisely capture decisions if mentioned." : ""}
+${actionExtractionEnabled ? "- Precisely capture action items with assignees if mentioned." : ""}
 ${sentimentAnalysisEnabled ? "- Detect the prevailing sentiment and emotional dynamics." : ""}
 - Extract "Key Insights" that go beyond a simple summary (strategic value).
 - Track specific questions raised that remain unanswered.
@@ -756,8 +643,6 @@ Return a JSON object with these exact keys:
 
     if (!content) return;
 
-    // JSON.parse failures are caught by the outer try/catch so a malformed AI
-    // response does not crash the chunk handler or corrupt state.
     const parsed = JSON.parse(content);
 
     state.summary = parsed.summary || state.summary;
@@ -795,86 +680,11 @@ Return a JSON object with these exact keys:
       ? parsed.questionsRaised
       : state.questionsRaised;
 
-    // Update the timestamp only on success so a failed run doesn't suppress
-    // the next attempt prematurely.
     state.lastSummarizedAt = Date.now();
   } catch (err) {
-    // Summarization is best-effort: log and move on.  The transcript itself
-    // has already been stored so the chunk handler should still report success.
     console.warn("[LateMeet] Summarization failed (non-fatal):", err);
   } finally {
-    // Always release the in-flight slot so future calls are not blocked.
     summaryInFlight = false;
-  }
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) return;
-
-  const parsed = JSON.parse(content);
-  state.summary = parsed.summary || state.summary;
-  if (topicDetectionEnabled) {
-    state.topics = Array.isArray(parsed.topics) ? parsed.topics : state.topics;
-    state.currentTopic = parsed.currentTopic || state.currentTopic;
-  } else {
-    state.topics = [];
-    state.currentTopic = "";
-  }
-  if (decisionDetectionEnabled) {
-    state.decisions = normalizeDecisions(parsed.decisions, state.decisions);
-  } else {
-    state.decisions = [];
-  }
-  if (actionExtractionEnabled) {
-    if (Array.isArray(parsed.actionItems)) {
-      state.actionItems = parsed.actionItems;
-      notifyNewActionItems(state.actionItems);
-    }
-    state.actionItems = normalizeActionItems(parsed.actionItems, state.actionItems);
-  } else {
-    state.actionItems = [];
-  }
-  if (sentimentAnalysisEnabled) {
-    state.sentiment = parsed.sentiment || state.sentiment;
-  } else {
-    state.sentiment = "neutral";
-  }
-  state.keyInsights = Array.isArray(parsed.keyInsights) ? parsed.keyInsights : state.keyInsights;
-  state.questionsRaised = Array.isArray(parsed.questionsRaised)
-    ? parsed.questionsRaised
-    : state.questionsRaised;
-  state.lastSummarizedAt = Date.now();
-}
-
-function actionItemKey(item: ActionItem | unknown): string {
-  if (item && typeof item === "object" && "task" in (item as object)) {
-    const task = (item as { task?: unknown }).task;
-    return String(task ?? "").trim();
-  }
-  return String(item ?? "").trim();
-}
-
-function notifyNewActionItems(items: ActionItem[]) {
-  if (!chrome.notifications) return;
-  for (const item of items) {
-    const key = actionItemKey(item);
-    if (!key || notifiedActionItems.has(key)) continue;
-    const message = key.length > 100 ? key.slice(0, 97) + "..." : key;
-    const notifId = `lm-action-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    chrome.notifications.create(
-      notifId,
-      {
-        type: "basic",
-        iconUrl: chrome.runtime.getURL("src/icons/icon128.png"),
-        title: "New Action Item",
-        message,
-        priority: 1,
-      },
-      () => {
-        if (!chrome.runtime.lastError) {
-          notifiedActionItems.add(key);
-        }
-      },
-    );
   }
 }
 
@@ -934,7 +744,7 @@ async function generateLateJoinerMessage(joinerName: string) {
   const fallback = `Hi ${joinerName}, welcome to the meeting! We are currently discussing ${context.currentTopic || "project updates"}.`;
 
   try {
-    const apiKey = await getOpenAiApiKey();
+    const apiKey = await getApiKey();
     if (!apiKey) return fallback;
 
     const prompt = `A participant named ${safeJoinerName} joined late. Meeting duration: ${Math.round(context.duration / 60)} minutes. Current topic: ${sanitizePromptText(context.currentTopic || "General discussion")}. Recent topics: ${sanitizePromptText(JSON.stringify(context.topics || []))}. Decisions: ${sanitizePromptText(JSON.stringify(context.decisions || []))}. Write a short welcome message under 3 sentences. Output plain text only.`;
@@ -1117,17 +927,26 @@ async function startAudioCapture(
 
 async function scanForMeetTabs() {
   try {
-    const meetTab = await resolveDetectedMeetTab();
-    if (meetTab && !state.isActive) {
-      resetState();
-      state.isActive = true;
-      state.meetingId = meetTab.meetingId;
-      state.meetingUrl = meetTab.meetingUrl;
-      state.targetTabId = meetTab.tab.id || null;
-      state.startTime = Date.now();
-      state.participants = ["You"];
-      console.log("[LateMeet] Proactively detected meeting:", meetTab.meetingId);
-      await broadcastStateUpdate();
+    const tabs = await chrome.tabs.query({ url: "https://meet.google.com/*" });
+    if (tabs.length > 0) {
+      for (const tab of tabs) {
+        const urlMatch = tab.url?.match(/meet\.google\.com\/([a-z\-]+)/);
+        const meetingId = urlMatch ? urlMatch[1] : null;
+        if (meetingId && meetingId !== "new") {
+          if (!state.isActive) {
+            resetState();
+            state.isActive = true;
+            state.meetingId = meetingId;
+            state.meetingUrl = tab.url || null;
+            state.targetTabId = tab.id || null;
+            state.startTime = Date.now();
+            state.participants = ["You"];
+            console.log("[LateMeet] Proactively detected meeting:", meetingId);
+            await broadcastStateUpdate();
+          }
+          return;
+        }
+      }
     }
   } catch (err) {
     console.error("[LateMeet] Scan for meet tabs failed:", err);
@@ -1148,9 +967,6 @@ async function stopAudioCapture(reason = "Stopped") {
 
   state.audioActive = false;
   state.isActive = false;
-  state.meetingId = null;
-  state.meetingUrl = null;
-  state.targetTabId = null;
 
   await broadcastStateUpdate();
 
@@ -1163,58 +979,17 @@ async function stopAudioCapture(reason = "Stopped") {
   await closeOffscreenDocumentIfPresent();
 }
 
-function parseMeetUrl(value: string | undefined | null): URL | null {
-  try {
-    const parsed = new URL(String(value || ""));
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-    if (parsed.hostname !== "meet.google.com") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function extractMeetCode(url: string | undefined | null): string | null {
-  const parsed = parseMeetUrl(url);
-  if (!parsed) return null;
-  const match = parsed.pathname.match(/^\/([a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3})(?:\/|$)/i);
-  return match ? match[1] : null;
-}
-
-function isMeetCode(value: string | null | undefined): boolean {
-  return /^[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}$/i.test(String(value || ""));
-}
-
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  const nextUrl = changeInfo.url || tab.url;
+  if (changeInfo.status === "complete" && tab.url?.includes("meet.google.com/")) {
+    const urlMatch = tab.url.match(/meet\.google\.com\/([a-z\-]+)/);
+    const meetingId = urlMatch ? urlMatch[1] : null;
 
-  // If we are actively capturing from this tab, stop capture as soon as the tab
-  // navigates away from a Meet meeting scope (privacy safety default).
-  if (state.audioActive && state.targetTabId && tabId === state.targetTabId) {
-    const isMeetUrl = Boolean(parseMeetUrl(nextUrl));
-    const meetCode = extractMeetCode(nextUrl);
-    if (!isMeetUrl) {
-      await stopAudioCapture("Navigated away from Meet");
-      return;
-    }
-    if (!meetCode) {
-      await stopAudioCapture("Left meeting");
-      return;
-    }
-    if (isMeetCode(state.meetingId) && meetCode !== state.meetingId) {
-      await stopAudioCapture("Switched meeting");
-      return;
-    }
-  }
-
-  if (changeInfo.status === "complete") {
-    const meetingId = extractMeetCode(nextUrl);
-    if (meetingId) {
+    if (meetingId && meetingId !== "new") {
       if (!state.isActive) {
         resetState();
         state.isActive = true;
         state.meetingId = meetingId;
-        state.meetingUrl = nextUrl || null;
+        state.meetingUrl = tab.url || null;
         state.targetTabId = tabId || null;
         state.startTime = Date.now();
         state.participants = ["You"];
@@ -1227,17 +1002,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    const meetingId = extractMeetCode(tab.url);
-    if (meetingId && !state.isActive) {
-      state.meetingId = meetingId;
-      state.meetingUrl = tab.url || null;
-      state.targetTabId = activeInfo.tabId;
-      await broadcastStateUpdate();
+    if (tab.url?.includes("meet.google.com/")) {
+      const urlMatch = tab.url.match(/meet\.google\.com\/([a-z\-]+)/);
+      const meetingId = urlMatch ? urlMatch[1] : null;
+      if (meetingId && meetingId !== "new" && !state.isActive) {
+        state.meetingId = meetingId;
+        state.meetingUrl = tab.url;
+        state.targetTabId = activeInfo.tabId;
+        await broadcastStateUpdate();
+      }
     }
   } catch (err) {
-    // Tab might be closed by now
-    console.log(err);
-    console.log(err); // since lint is giving error
     console.debug("[LateMeet] tab activation handler failed:", err);
   }
 });
@@ -1286,7 +1061,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const meetingId = message.meetingId || state.meetingId;
-        const meetingUrl = message.meetingUrl || sender?.tab?.url || state.meetingUrl;
+        const meetingUrl = sender?.tab?.url || state.meetingUrl;
         await startAudioCapture(
           tabId,
           meetingId,
@@ -1299,36 +1074,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "OFFSCREEN_LOG": {
-      case "MANUAL_STOP_AUDIO": {
-        if (state.audioActive || state.isActive) {
-          await stopAudioCapture("Stopped by user");
-        }
-        sendResponse({ success: true });
-        return;
-      }
-
-      case "MEETING_ENDED":
-      case "CALL_ENDED": {
-        if (state.audioActive || state.isActive) {
-          await stopAudioCapture("Call ended");
-        }
-        sendResponse({ success: true });
-        return;
-      }
-
-      case "WAVEFORM_DATA": {
-        if (!message._relayed) {
-          chrome.runtime
-            .sendMessage({ type: "WAVEFORM_DATA", buckets: message.buckets, _relayed: true })
-            .catch(() => {});
-        }
-        sendResponse({ success: true });
-        return;
-      }
-
-      case "OFFSCREEN_LOG": {
-        // Relay log lines from the offscreen document into the SW console so
-        // they are visible without opening the offscreen DevTools separately.
         console.log("[LateMeet][offscreen]", message.message);
         sendResponse({ success: true });
         return;
@@ -1348,7 +1093,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const chunkSpeaker = getSpeakerForCurrentChunk();
         const base64Len = message.audioBase64?.length ?? 0;
         const approxBytes = Math.round((base64Len * 3) / 4);
         console.log(
@@ -1363,13 +1107,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const refinedText = await refineTranscription(rawText);
             console.log(`[LateMeet] transcript refined — ${refinedText.length} chars`);
             state.transcript.push({ speaker: "Audio", text: refinedText, timestamp: Date.now() });
-            // summarizeTranscriptIfNeeded is best-effort — failures are caught
-            // internally and must not propagate back to the chunk handler.
-            state.transcript.push({
-              speaker: chunkSpeaker,
-              text: refinedText,
-              timestamp: Date.now(),
-            });
             await summarizeTranscriptIfNeeded();
             await broadcastStateUpdate();
           } else {
@@ -1380,21 +1117,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.error("[LateMeet] chunk processing failed:", err);
           sendResponse({ success: false, error: (err as Error).message });
         }
-        return;
-      }
-
-      case "ACTIVE_SPEAKER_CHANGED": {
-        const speaker = typeof message.name === "string" ? message.name.trim() : "";
-
-        if (!speaker) {
-          sendResponse({ success: false, error: "speaker name is required" });
-          return;
-        }
-
-        activeSpeakerName = speaker;
-        activeSpeakerUpdatedAt = Date.now();
-        state.currentSpeaker = speaker;
-        sendResponse({ success: true });
         return;
       }
 
