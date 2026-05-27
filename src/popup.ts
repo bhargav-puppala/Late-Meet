@@ -1,5 +1,7 @@
 import { State } from "./types";
 import { initTheme } from "./theme.js";
+import { getApiCredentials, saveApiCredentials } from "./utils/credentials";
+import { resolveManualMeetTab } from "./meetingTabs";
 
 initTheme();
 
@@ -13,7 +15,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let lastState: State | null = null;
 
   // ——— Check if API key is configured ———
-  const config = await chrome.storage.session.get(["openai_api_key", "elevenlabs_api_key"]);
+  const config = await getApiCredentials();
 
   if (!config.openai_api_key && !config.elevenlabs_api_key) {
     setupView.style.display = "block";
@@ -35,7 +37,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Since the popup only has one input currently, we'll save it as openai_api_key
     // Users can configure ElevenLabs in the options page.
-    await chrome.storage.session.set({ openai_api_key: apiKey });
+    await saveApiCredentials({ openai_api_key: apiKey });
 
     setupView.style.display = "none";
     mainView.style.display = "block";
@@ -65,6 +67,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ——— Start Copilot (Audio Capture with User Gesture) ———
   const copilotBtn = document.getElementById("start-copilot-btn") as HTMLButtonElement | null;
 
+  async function handleStopAudio(btn?: HTMLButtonElement | null) {
+    if (!lastState?.audioActive) return;
+
+    try {
+      if (btn) btn.disabled = true;
+      await chrome.runtime.sendMessage({ type: "MANUAL_STOP_AUDIO" });
+    } catch (err) {
+      console.error("[LateMeet] Failed to stop audio:", err);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function handleStartAudio(btn: HTMLButtonElement) {
     const textEl = btn.querySelector(".copilot-btn-text");
     const originalText = textEl?.textContent || "Start";
@@ -80,27 +95,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (textEl) textEl.textContent = "Starting...";
       btn.classList.add("loading");
 
-      chrome.tabs.query({ url: "https://meet.google.com/*" }, (tabs) => {
-        if (tabs.length === 0) {
-          handleStartAudioError(new Error("No Google Meet tab found. Join a meeting first."));
-          return;
-        }
-        const meetTab = tabs[0];
+      resolveManualMeetTab()
+        .then(({ tab: meetTab, meetingId, meetingUrl }) => {
+          // --- Get Media Stream ID in foreground (popup) to ensure user gesture propagation ---
+          chrome.tabCapture.getMediaStreamId({ targetTabId: meetTab.id }, async (streamId) => {
+            if (chrome.runtime.lastError) {
+              const err = chrome.runtime.lastError.message || "Unknown error";
+              console.error("[LateMeet] Popup getMediaStreamId error:", err);
+              // If already capturing, we can treat it as success or inform the background
+              if (err.includes("active stream")) {
+                setCopilotActive(true);
+                return;
+              } else {
+                handleStartAudioError(
+                  new Error(
+                    "Capture permission denied. Try clicking the extension icon again on the Meet tab.",
+                  ),
+                );
+                return;
+              }
+            }
 
-        // Extract meeting ID from tab URL
-        const urlMatch = meetTab.url?.match(/meet\.google\.com\/([a-z\-]+)/);
-        const meetingId = urlMatch ? urlMatch[1] : null;
-
-        // --- Get Media Stream ID in foreground (popup) to ensure user gesture propagation ---
-        chrome.tabCapture.getMediaStreamId({ targetTabId: meetTab.id }, async (streamId) => {
-          if (chrome.runtime.lastError) {
-            const err = chrome.runtime.lastError.message || "Unknown error";
-            console.error("[LateMeet] Popup getMediaStreamId error:", err);
-            // If already capturing, we can treat it as success or inform the background
-            if (err.includes("active stream")) {
-              setCopilotActive(true);
-              return;
-            } else {
+            if (!streamId) {
               handleStartAudioError(
                 new Error(
                   "Capture permission denied. Try clicking the extension icon again on the Meet tab.",
@@ -108,53 +124,45 @@ document.addEventListener("DOMContentLoaded", async () => {
               );
               return;
             }
-          }
 
-          if (!streamId) {
-            handleStartAudioError(
-              new Error(
-                "Capture permission denied. Try clicking the extension icon again on the Meet tab.",
-              ),
-            );
-            return;
-          }
+            try {
+              const response = await chrome.runtime.sendMessage({
+                type: "MANUAL_START_AUDIO",
+                tabId: meetTab.id,
+                meetingId: meetingId,
+                meetingUrl: meetingUrl,
+                streamId: streamId,
+                includeMicrophone: true,
+              });
 
-          try {
-            const response = await chrome.runtime.sendMessage({
-              type: "MANUAL_START_AUDIO",
-              tabId: meetTab.id,
-              meetingId: meetingId,
-              streamId: streamId,
-              includeMicrophone: true,
-            });
-
-            if (response && response.success) {
-              // Clear loading state before setting active state
-              btn.disabled = false;
-              btn.classList.remove("loading");
-              setCopilotActive(true);
-              // Immediately show meeting section and start timer
-              if (meetingSection) meetingSection.style.display = "block";
-              if (noMeetingSection) noMeetingSection.style.display = "none";
-              if (meetingId) {
-                const meetingIdEl = document.getElementById("meeting-id");
-                if (meetingIdEl) meetingIdEl.textContent = meetingId;
+              if (response && response.success) {
+                // Clear loading state before setting active state
+                btn.disabled = false;
+                btn.classList.remove("loading");
+                setCopilotActive(true);
+                // Immediately show meeting section and start timer
+                if (meetingSection) meetingSection.style.display = "block";
+                if (noMeetingSection) noMeetingSection.style.display = "none";
+                if (meetingId) {
+                  const meetingIdEl = document.getElementById("meeting-id");
+                  if (meetingIdEl) meetingIdEl.textContent = meetingId;
+                }
+                const badge = document.getElementById("status-badge");
+                if (badge) {
+                  badge.className = "status-badge active";
+                  const statusText = badge.querySelector(".status-text");
+                  if (statusText) statusText.textContent = "Recording...";
+                }
+                startDurationTimer(Date.now());
+              } else {
+                throw new Error(response?.error || "Failed to start audio capture");
               }
-              const badge = document.getElementById("status-badge");
-              if (badge) {
-                badge.className = "status-badge active";
-                const statusText = badge.querySelector(".status-text");
-                if (statusText) statusText.textContent = "Recording...";
-              }
-              startDurationTimer(Date.now());
-            } else {
-              throw new Error(response?.error || "Failed to start audio capture");
+            } catch (err: any) {
+              handleStartAudioError(err);
             }
-          } catch (err: any) {
-            handleStartAudioError(err);
-          }
-        });
-      });
+          });
+        })
+        .catch(handleStartAudioError);
     } catch (err: any) {
       handleStartAudioError(err);
     }
@@ -176,7 +184,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   copilotBtn?.addEventListener("click", () => handleStartAudio(copilotBtn));
   document.getElementById("meeting-start-audio-btn")?.addEventListener("click", (e) => {
     const btn = e.currentTarget as HTMLButtonElement | null;
-    if (btn) handleStartAudio(btn);
+    if (!btn) return;
+    if (lastState?.audioActive) {
+      handleStopAudio(btn);
+      return;
+    }
+    handleStartAudio(btn);
   });
 
   function setCopilotActive(active: boolean) {
@@ -184,6 +197,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const miniBtn = document.getElementById("meeting-start-audio-btn");
     const iconEl = copilotBtn.querySelector(".copilot-btn-icon");
     const textEl = copilotBtn.querySelector(".copilot-btn-text");
+
+    const getMiniBtnLabelNode = () => {
+      if (!miniBtn) return null;
+      return (
+        Array.from(miniBtn.childNodes)
+          .reverse()
+          .find((n) => n.nodeType === Node.TEXT_NODE && String(n.textContent || "").trim()) || null
+      );
+    };
 
     if (active) {
       copilotBtn.classList.remove("loading");
@@ -193,7 +215,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         iconEl.innerHTML =
           '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
       copilotBtn.disabled = true;
-      if (miniBtn) miniBtn.style.display = "none";
+      if (miniBtn) {
+        miniBtn.style.display = "flex";
+        miniBtn.classList.add("active");
+        miniBtn.title = "Stop audio capture";
+        const labelNode = getMiniBtnLabelNode();
+        if (labelNode) labelNode.textContent = " Stop Audio";
+      }
     } else {
       copilotBtn.classList.remove("active");
       if (textEl) textEl.textContent = "Start Copilot";
@@ -201,7 +229,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         iconEl.innerHTML =
           '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>';
       copilotBtn.disabled = false;
-      if (miniBtn) miniBtn.style.display = "flex";
+      if (miniBtn) {
+        miniBtn.style.display = "flex";
+        miniBtn.classList.remove("active");
+        miniBtn.title = "Start audio capture";
+        const labelNode = getMiniBtnLabelNode();
+        if (labelNode) labelNode.textContent = " Start Audio";
+      }
     }
   }
 
@@ -259,7 +293,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let durationInterval: number | NodeJS.Timeout | null = null;
 
   function startDurationTimer(startTime: number) {
-    if (durationInterval) clearInterval(durationInterval as any);
+    if (durationInterval) return;
 
     durationInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);

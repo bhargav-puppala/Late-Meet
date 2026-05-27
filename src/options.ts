@@ -1,3 +1,5 @@
+import { getApiCredentials, saveApiCredentials } from "./utils/credentials";
+
 interface Settings {
   summarizationInterval?: number;
   vadThreshold?: number;
@@ -27,11 +29,10 @@ function applyThemePreview(theme: "system" | "light" | "dark", accent: string) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   // ——— Load saved settings ———
-  const config = (await chrome.storage.local.get([
-    "openai_api_key",
-    "elevenlabs_api_key",
-    "settings",
-  ])) as { openai_api_key?: string; elevenlabs_api_key?: string; settings?: Settings };
+  const [credentials, config] = await Promise.all([
+    getApiCredentials(),
+    chrome.storage.local.get("settings") as Promise<{ settings?: Settings }>,
+  ]);
 
   const settings: Settings = config.settings || {};
 
@@ -49,13 +50,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   const openaiKeyInput = document.getElementById("openai-key") as HTMLInputElement | null;
-  if (openaiKeyInput && config.openai_api_key) {
-    openaiKeyInput.value = config.openai_api_key;
+  if (openaiKeyInput && credentials.openai_api_key) {
+    openaiKeyInput.value = credentials.openai_api_key;
   }
 
   const elevenlabsKeyInput = document.getElementById("elevenlabs-key") as HTMLInputElement | null;
-  if (elevenlabsKeyInput && config.elevenlabs_api_key) {
-    elevenlabsKeyInput.value = config.elevenlabs_api_key;
+  if (elevenlabsKeyInput && credentials.elevenlabs_api_key) {
+    elevenlabsKeyInput.value = credentials.elevenlabs_api_key;
   }
 
   // Interval slider
@@ -186,14 +187,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         "210, 100%, 50%",
     };
 
-    const saveData: { settings: Settings; openai_api_key?: string; elevenlabs_api_key?: string } = {
-      settings: newSettings,
-    };
-
-    if (openaiKey) saveData.openai_api_key = openaiKey;
-    if (elevenlabsKey) saveData.elevenlabs_api_key = elevenlabsKey;
-
-    await chrome.storage.local.set(saveData);
+    await Promise.all([
+      chrome.storage.local.set({ settings: newSettings }),
+      saveApiCredentials({ openai_api_key: openaiKey, elevenlabs_api_key: elevenlabsKey }),
+    ]);
 
     // Show success
     const status = document.getElementById("save-status");

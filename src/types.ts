@@ -50,6 +50,7 @@ export interface State {
   timeline: TimelineEvent[];
   transcript: TranscriptEntry[];
   audioActive: boolean;
+  currentSpeaker?: string | null;
   targetTabId?: number | null;
   lastSummarizedAt?: number;
   duration?: number;

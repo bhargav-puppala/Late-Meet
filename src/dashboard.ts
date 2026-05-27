@@ -1,9 +1,65 @@
 import { State, Topic, TranscriptEntry, TimelineEvent, Decision, ActionItem } from "./types";
 import { initTheme } from "./theme.js";
+import { resolveManualMeetTab } from "./meetingTabs";
 
 initTheme();
 
+// ——— Action Item Status Persistence ———
+const actionStatuses = new Map<string, boolean>();
+let currentMeetingId = "unknown";
+
+function resolveActionKey(item: ActionItem | unknown): string {
+  if (item && typeof item === "object" && "task" in (item as object)) {
+    const task = (item as { task?: unknown }).task;
+    return String(task ?? "").trim();
+  }
+  return String(item ?? "").trim();
+}
+
+function buildActionStatusKey(meetingId: string, task: string): string {
+  return `${meetingId}::${task}`;
+}
+
+function normalizeActionItem(input: unknown): ActionItem | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { task?: unknown; owner?: unknown; deadline?: unknown };
+  const task = String(raw.task ?? "").trim();
+  if (!task) return null;
+  return {
+    task,
+    owner: String(raw.owner ?? "").trim() || undefined,
+    deadline: String(raw.deadline ?? "").trim() || undefined,
+  } as ActionItem;
+}
+
+async function loadActionStatuses() {
+  try {
+    const result = await chrome.storage.local.get("actionItemStatuses");
+    const stored = result.actionItemStatuses;
+    if (stored && typeof stored === "object") {
+      for (const [k, v] of Object.entries(stored as Record<string, unknown>)) {
+        actionStatuses.set(k, Boolean(v));
+      }
+    }
+  } catch (err) {
+    console.error("[Dashboard] Failed to load action statuses:", err);
+  }
+}
+
+async function persistActionStatuses() {
+  try {
+    const obj: Record<string, boolean> = {};
+    actionStatuses.forEach((v, k) => {
+      obj[k] = v;
+    });
+    await chrome.storage.local.set({ actionItemStatuses: obj });
+  } catch (err) {
+    console.error("[Dashboard] Failed to persist action statuses:", err);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  await loadActionStatuses();
   // ——— Waveform Visualizer ———
   const WAVEFORM_N = 32;
   const WAVEFORM_H = 48;
@@ -124,7 +180,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const audioBtn = document.getElementById("dash-start-audio-btn") as HTMLButtonElement | null;
   audioBtn?.addEventListener("click", async () => {
     if (lastState?.audioActive) {
-      console.log("[Dashboard] Audio already active, skipping.");
+      try {
+        audioBtn.disabled = true;
+        await chrome.runtime.sendMessage({ type: "MANUAL_STOP_AUDIO" });
+      } catch (err) {
+        console.error("[Dashboard] Failed to stop audio:", err);
+      } finally {
+        audioBtn.disabled = false;
+      }
       return;
     }
 
@@ -141,63 +204,59 @@ document.addEventListener("DOMContentLoaded", async () => {
         console.warn("[Dashboard] Mic permission not granted — waveform will use tab audio only");
       }
 
-      chrome.tabs.query({ url: "https://meet.google.com/*" }, (meetTabs) => {
-        if (meetTabs.length === 0) {
-          handleDashboardAudioError(new Error("No Google Meet tab found"));
-          return;
-        }
-        const meetTab = meetTabs[0];
-        const urlMatch = meetTab.url?.match(/meet\.google\.com\/([a-z\-]+)/);
-        const meetingId = urlMatch ? urlMatch[1] : null;
+      resolveManualMeetTab()
+        .then(({ tab: meetTab, meetingId, meetingUrl }) => {
+          // --- Get Media Stream ID in foreground (dashboard) to ensure user gesture propagation ---
+          chrome.tabCapture.getMediaStreamId({ targetTabId: meetTab.id }, async (streamId) => {
+            if (chrome.runtime.lastError) {
+              const err = chrome.runtime.lastError.message || "Unknown error";
+              console.error("[Dashboard] getMediaStreamId error:", err);
+              if (err.includes("active stream")) {
+                setAudioBtnActive(true);
+                return;
+              } else {
+                handleDashboardAudioError(
+                  new Error('Capture permission denied. Try clicking "Start Audio" again.'),
+                );
+                return;
+              }
+            }
 
-        // --- Get Media Stream ID in foreground (dashboard) to ensure user gesture propagation ---
-        chrome.tabCapture.getMediaStreamId({ targetTabId: meetTab.id }, async (streamId) => {
-          if (chrome.runtime.lastError) {
-            const err = chrome.runtime.lastError.message || "Unknown error";
-            console.error("[Dashboard] getMediaStreamId error:", err);
-            if (err.includes("active stream")) {
-              setAudioBtnActive(true);
-              return;
-            } else {
+            if (!streamId) {
               handleDashboardAudioError(
                 new Error('Capture permission denied. Try clicking "Start Audio" again.'),
               );
               return;
             }
-          }
 
-          if (!streamId) {
-            handleDashboardAudioError(
-              new Error('Capture permission denied. Try clicking "Start Audio" again.'),
-            );
-            return;
-          }
+            try {
+              const response = await chrome.runtime.sendMessage({
+                type: "MANUAL_START_AUDIO",
+                tabId: meetTab.id,
+                meetingId: meetingId,
+                meetingUrl: meetingUrl,
+                streamId: streamId,
+                includeMicrophone: true,
+              });
 
-          try {
-            const response = await chrome.runtime.sendMessage({
-              type: "MANUAL_START_AUDIO",
-              tabId: meetTab.id,
-              meetingId: meetingId,
-              streamId: streamId,
-              includeMicrophone: true,
-            });
-
-            if (response && response.success) {
-              setAudioBtnActive(true);
-              // Start timer immediately
-              startTimer(Date.now());
-              const statusText = document.getElementById("dash-status-text");
-              const statusDot = document.querySelector(".dash-status-dot");
-              if (statusText) statusText.textContent = `Meeting active — ${meetingId || "unknown"}`;
-              if (statusDot) statusDot.classList.add("active");
-            } else {
-              throw new Error(response?.error || "Failed to start audio");
+              if (response && response.success) {
+                setAudioBtnActive(true);
+                // Start timer immediately
+                startTimer(Date.now());
+                const statusText = document.getElementById("dash-status-text");
+                const statusDot = document.querySelector(".dash-status-dot");
+                if (statusText)
+                  statusText.textContent = `Meeting active — ${meetingId || "unknown"}`;
+                if (statusDot) statusDot.classList.add("active");
+              } else {
+                throw new Error(response?.error || "Failed to start audio");
+              }
+            } catch (err: any) {
+              handleDashboardAudioError(err);
             }
-          } catch (err: any) {
-            handleDashboardAudioError(err);
-          }
-        });
-      });
+          });
+        })
+        .catch(handleDashboardAudioError);
     } catch (err: any) {
       handleDashboardAudioError(err);
     }
@@ -221,10 +280,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   function setAudioBtnActive(active: boolean) {
     if (!audioBtn) return;
     if (active) {
-      audioBtn.style.display = "none";
       audioBtn.classList.add("active");
+      audioBtn.disabled = false;
+      audioBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right: 6px;"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 12h6"></path></svg> Stop Audio';
     } else {
-      audioBtn.style.display = "flex";
       audioBtn.classList.remove("active");
       audioBtn.disabled = false;
       audioBtn.innerHTML =
@@ -236,7 +296,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let timerInterval: number | NodeJS.Timeout | null = null;
 
   function startTimer(startTime: number) {
-    if (timerInterval) clearInterval(timerInterval as any);
+    if (timerInterval) return;
     timerInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const timerEl = document.getElementById("dash-timer");
@@ -246,6 +306,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ——— Update Dashboard ———
   function updateDashboard(state: State) {
+    currentMeetingId = state.meetingId || "unknown";
     // Status
     const statusDot = document.querySelector(".dash-status-dot");
     const statusText = document.getElementById("dash-status-text");
@@ -391,20 +452,70 @@ document.addEventListener("DOMContentLoaded", async () => {
       container.innerHTML = '<div class="empty-msg">No action items detected yet</div>';
       return;
     }
-    container.innerHTML = actions
-      .map(
-        (a) => `
-      <div class="action-item">
-        <div class="action-check"></div>
-        <div class="action-info">
-          <div class="action-task">${escapeHtml(a.task || "")}</div>
-          ${a.owner ? `<span class="action-owner"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(a.owner)}</span>` : ""}
-          ${a.deadline ? `<div class="action-deadline"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>${escapeHtml(a.deadline)}</div>` : ""}
-        </div>
-      </div>
-    `,
-      )
-      .join("");
+
+    container.innerHTML = "";
+    actions.forEach((a, idx) => {
+      const normalized = normalizeActionItem(a);
+      const task = normalized?.task ?? resolveActionKey(a);
+      if (!task) return;
+      const owner = normalized?.owner ?? "";
+      const deadline = normalized?.deadline ?? "";
+      const statusKey = buildActionStatusKey(currentMeetingId, task);
+      const done = actionStatuses.get(statusKey) === true;
+      const cbId = `action-cb-${idx}`;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "action-item" + (done ? " action-item--done" : "");
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "action-checkbox";
+      checkbox.id = cbId;
+      checkbox.checked = done;
+      checkbox.setAttribute("aria-label", "Mark task complete");
+      checkbox.dataset.task = task;
+      checkbox.dataset.meetingId = currentMeetingId;
+
+      const label = document.createElement("label");
+      label.className = "action-info";
+      label.htmlFor = cbId;
+
+      const taskDiv = document.createElement("div");
+      taskDiv.className = "action-task" + (done ? " action-task--done" : "");
+      taskDiv.textContent = task;
+      label.appendChild(taskDiv);
+
+      if (owner) {
+        const ownerSpan = document.createElement("span");
+        ownerSpan.className = "action-owner";
+        ownerSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`;
+        ownerSpan.appendChild(document.createTextNode(owner));
+        label.appendChild(ownerSpan);
+      }
+
+      if (deadline) {
+        const deadlineDiv = document.createElement("div");
+        deadlineDiv.className = "action-deadline";
+        deadlineDiv.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon" style="margin-right:2px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>`;
+        deadlineDiv.appendChild(document.createTextNode(deadline));
+        label.appendChild(deadlineDiv);
+      }
+
+      checkbox.addEventListener("change", () => {
+        const taskText = checkbox.dataset.task || "";
+        const meetId = checkbox.dataset.meetingId || currentMeetingId;
+        const key = buildActionStatusKey(meetId, taskText);
+        const isDone = checkbox.checked;
+        actionStatuses.set(key, isDone);
+        void persistActionStatuses();
+        wrapper.classList.toggle("action-item--done", isDone);
+        taskDiv.classList.toggle("action-task--done", isDone);
+      });
+
+      wrapper.appendChild(checkbox);
+      wrapper.appendChild(label);
+      container.appendChild(wrapper);
+    });
   }
 
   // ——— People ———
@@ -594,7 +705,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (state.actionItems?.length) {
       markdown += `## Action Items\n`;
       state.actionItems.forEach((a: ActionItem) => {
-        markdown += `- [ ] ${a.task}`;
+        const task = resolveActionKey(a);
+        if (!task) return;
+        const statusKey = buildActionStatusKey(currentMeetingId, task);
+        const done = actionStatuses.get(statusKey) === true;
+        markdown += done ? `- [x] ${task}` : `- [ ] ${task}`;
         if (a.owner) markdown += ` → ${a.owner}`;
         if (a.deadline) markdown += ` (due: ${a.deadline})`;
         markdown += "\n";
@@ -774,6 +889,10 @@ document.addEventListener("DOMContentLoaded", async () => {
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Export
               </button>
+              <button class="session-export-btn session-download-btn" data-session-id="${s.id}" title="Download as Markdown File">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
+                Download
+              </button>
               <button class="session-delete-btn" data-session-id="${s.id}" title="Delete session">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                 Delete
@@ -785,11 +904,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         .join("");
 
       // Wire up export buttons
-      container.querySelectorAll<HTMLButtonElement>(".session-export-btn").forEach((btn) => {
+      container
+        .querySelectorAll<HTMLButtonElement>(".session-export-btn:not(.session-download-btn)")
+        .forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const sessionId = btn.dataset.sessionId;
+            const session = sessions.find((s: State) => (s as any).id === sessionId);
+            if (session) exportSessionMarkdown(session);
+          });
+        });
+
+      container.querySelectorAll<HTMLButtonElement>(".session-download-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const sessionId = btn.dataset.sessionId;
           const session = sessions.find((s: State) => (s as any).id === sessionId);
-          if (session) exportSessionMarkdown(session);
+          if (session) downloadSessionMarkdown(session);
         });
       });
 
@@ -808,7 +937,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  function exportSessionMarkdown(session: State) {
+  function generateSessionMarkdown(session: State): string {
     let md = `# Meeting Summary\n\n`;
     md += `**Date:** ${new Date((session as any).savedAt || session.startTime).toLocaleString()}\n`;
     md += `**Duration:** ${formatDuration(session.duration || 0)}\n`;
@@ -829,14 +958,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       md += "\n";
     }
     if (session.actionItems?.length) {
+      const sessionMeetingId = session.meetingId || "unknown";
       md += `## Action Items\n`;
       session.actionItems.forEach((a: ActionItem) => {
-        md += `- [ ] ${a.task}`;
+        const task = resolveActionKey(a);
+        if (!task) return;
+        const statusKey = buildActionStatusKey(sessionMeetingId, task);
+        const done = actionStatuses.get(statusKey) === true;
+        md += done ? `- [x] ${task}` : `- [ ] ${task}`;
         if (a.owner) md += ` → ${a.owner}`;
         if (a.deadline) md += ` (due: ${a.deadline})`;
         md += "\n";
       });
     }
+    return md;
+  }
+
+  function exportSessionMarkdown(session: State) {
+    const md = generateSessionMarkdown(session);
 
     navigator.clipboard
       .writeText(md)
@@ -849,6 +988,14 @@ document.addEventListener("DOMContentLoaded", async () => {
           "error",
         );
       });
+  }
+
+  function downloadSessionMarkdown(session: State) {
+    const md = generateSessionMarkdown(session);
+
+    const filename = `meeting-summary-${new Date((session as any).savedAt || session.startTime).toISOString().slice(0, 10)}.md`;
+    downloadFile(md, filename, "text/markdown");
+    showToast("Downloaded as .md file", "success");
   }
 
   // Load sessions on tab switch

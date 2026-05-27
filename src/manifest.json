@@ -3,7 +3,7 @@
   "name": "Late Meet",
   "version": "1.1.0",
   "description": "AI meeting copilot for Google Meet with local-first transcription and summaries",
-  "permissions": ["storage", "tabs", "tabCapture", "offscreen", "sidePanel"],
+  "permissions": ["storage", "tabs", "tabCapture", "offscreen", "sidePanel", "notifications"],
   "host_permissions": [
     "https://meet.google.com/*",
     "https://api.openai.com/*",

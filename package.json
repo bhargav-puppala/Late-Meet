@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "tsx --test src/audioProcessing.test.ts src/participantDetection.test.ts src/meetingTabs.test.ts",
     "lint": "eslint . --ext .ts,.js",
     "type-check": "tsc --noEmit",
     "format": "prettier --write .",
@@ -51,6 +52,7 @@
     "husky": "^9.0.11",
     "lint-staged": "^15.2.2",
     "prettier": "^3.2.5",
+    "tsx": "^4.20.3",
     "typescript": "^5.3.3",
     "vite": "^5.4.21"
   },

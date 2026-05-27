@@ -1,6 +1,7 @@
 // OpenAI and ElevenLabs API wrappers for Meeting Copilot
 
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { getOpenAiApiKey } from "./credentials";
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions";
@@ -40,8 +41,7 @@ export interface ChatCompletionResponse {
  * Get the stored OpenAI API key
  */
 export async function getApiKey(): Promise<string | null> {
-  const result = await chrome.storage.session.get("openai_api_key");
-  return (result.openai_api_key as string) || null;
+  return getOpenAiApiKey();
 }
 /**
  * Call OpenAI Chat Completions API
