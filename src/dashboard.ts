@@ -184,16 +184,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         loadedTabs.add(tabId);
         showSkeletonForTab(tabId);
         setTimeout(() => {
-          if (lastState) {
-            if (tabId === "topics") updateTopics(lastState.topics);
-            else if (tabId === "decisions") updateDecisions(lastState.decisions);
-            else if (tabId === "actions") updateActions(lastState.actionItems);
-            else if (tabId === "people")
-              updatePeople(lastState.participants, lastState.lateJoiners);
-            else if (tabId === "timeline") updateTimeline(lastState.timeline);
-            else if (tabId === "transcript") updateTranscript(lastState.transcript);
-          }
-          if (tabId === "sessions") loadSavedSessions();
+          if (tabId === "topics") updateTopics(lastState?.topics || []);
+          else if (tabId === "decisions") updateDecisions(lastState?.decisions || []);
+          else if (tabId === "actions") updateActions(lastState?.actionItems || []);
+          else if (tabId === "people")
+            updatePeople(lastState?.participants || [], lastState?.lateJoiners || []);
+          else if (tabId === "timeline") updateTimeline(lastState?.timeline || []);
+          else if (tabId === "transcript") updateTranscript(lastState?.transcript || []);
+          else if (tabId === "sessions") loadSavedSessions();
         }, 150);
       }
     });
