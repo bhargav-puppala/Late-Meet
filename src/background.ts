@@ -1112,30 +1112,41 @@ async function scanForMeetTabs() {
   }
 }
 
+let isStoppingAudio = false;
+
 async function stopAudioCapture(reason = "Stopped") {
+  if (isStoppingAudio) {
+    console.log("[LateMeet] stop already in progress, skipping duplicate request.");
+    return;
+  }
+  isStoppingAudio = true;
   try {
-    await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP_CAPTURE" });
-  } catch {
-    // Ignore if offscreen not running
+    try {
+      await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP_CAPTURE" });
+    } catch {
+      // Ignore if offscreen not running
+    }
+
+    if (state.audioActive) {
+      addTimeline(`Meeting ended (${reason})`);
+      await savePendingSession();
+    }
+
+    state.audioActive = false;
+    state.isActive = false;
+
+    await broadcastStateUpdate();
+
+    try {
+      await chrome.runtime.sendMessage({ type: "SESSION_ENDED" });
+    } catch {
+      // no listeners
+    }
+
+    await closeOffscreenDocumentIfPresent();
+  } finally {
+    isStoppingAudio = false;
   }
-
-  if (state.audioActive) {
-    addTimeline(`Meeting ended (${reason})`);
-    await savePendingSession();
-  }
-
-  state.audioActive = false;
-  state.isActive = false;
-
-  await broadcastStateUpdate();
-
-  try {
-    await chrome.runtime.sendMessage({ type: "SESSION_ENDED" });
-  } catch {
-    // no listeners
-  }
-
-  await closeOffscreenDocumentIfPresent();
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
