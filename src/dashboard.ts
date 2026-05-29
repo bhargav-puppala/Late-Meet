@@ -195,7 +195,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             updatePeople(lastState?.participants || [], lastState?.lateJoiners || []);
           else if (tabId === "timeline") updateTimeline(lastState?.timeline || []);
           else if (tabId === "transcript") updateTranscript(lastState?.transcript || []);
-          else if (tabId === "sessions") loadSavedSessions();
+          else if (tabId === "sessions") loadMeetingHistory();
         }, 150);
       }
     });
@@ -227,10 +227,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
     if (message.type === "SESSION_ENDED") {
+      // Reload history if on that tab
+      const historyTab = document.querySelector('[data-tab="history"]');
+      if (historyTab?.classList.contains("active")) {
+        loadMeetingHistory();
+      }
       // Reload sessions if on that tab
       const sessionsTab = document.querySelector('[data-tab="sessions"]');
       if (sessionsTab?.classList.contains("active")) {
-        loadSavedSessions();
+        loadMeetingHistory();
       } else {
         loadedTabs.delete("sessions");
       }
@@ -964,15 +969,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
-  // ——— Saved Sessions Tab ———
-  async function loadSavedSessions() {
+  // ——— Meeting History Tab ———
+  let sessionToDelete: string | null = null;
+
+  async function loadMeetingHistory() {
     try {
       const sessions: State[] = await chrome.runtime.sendMessage({ type: "GET_SAVED_SESSIONS" });
-      const container = document.getElementById("dash-sessions-list");
+      const container = document.getElementById("dash-history-list");
       if (!container) return;
       if (!sessions || sessions.length === 0) {
         container.innerHTML =
-          '<div class="empty-msg">No saved sessions yet. Sessions are saved when you end a meeting and click "Save".</div>';
+          '<div class="empty-msg">No history exists yet. Sessions are saved when you end a meeting and click "Save".</div>';
         return;
       }
 
@@ -995,13 +1002,13 @@ document.addEventListener("DOMContentLoaded", async () => {
             <div class="session-item-header">
               <div>
                 <div class="session-item-date">${escapeHtml(date)} at ${escapeHtml(time)}</div>
-                <div class="session-item-id">${escapeHtml(s.meetingId || "Unknown Meeting")}</div>
+                <div class="session-item-id" title="${escapeHtml(s.meetingUrl || "")}">${escapeHtml(s.meetingUrl || s.meetingId || "Unknown Meeting")}</div>
               </div>
               <div class="session-item-meta">
                 <span>${formatDuration(s.duration || 0)}</span>
               </div>
             </div>
-            <div class="session-item-summary">${escapeHtml(s.summary || "No summary available")}</div>
+            <div class="session-item-summary" style="cursor: pointer;" title="Click to expand/collapse summary">${escapeHtml(s.summary || "No summary available")}</div>
             <div class="session-item-stats">
               <span>${topicCount} topics</span>
               <span>${decisionCount} decisions</span>
@@ -1047,18 +1054,42 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       // Wire up delete buttons
       container.querySelectorAll<HTMLButtonElement>(".session-delete-btn").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const sessionId = btn.dataset.sessionId;
-          if (sessionId) {
-            await chrome.runtime.sendMessage({ type: "DELETE_SAVED_SESSION", sessionId });
-            loadSavedSessions();
+        btn.addEventListener("click", () => {
+          sessionToDelete = btn.dataset.sessionId || null;
+          if (sessionToDelete) {
+            document.getElementById("delete-confirm-modal")?.classList.remove("hidden");
           }
         });
       });
+
+      // Wire up summary expand/collapse
+      container.querySelectorAll<HTMLDivElement>(".session-item-summary").forEach((summary) => {
+        summary.addEventListener("click", () => {
+          const item = summary.closest(".session-item");
+          if (item) item.classList.toggle("expanded");
+        });
+      });
     } catch (err) {
-      console.error("[Dashboard] Failed to load sessions:", err);
+      console.error("[Dashboard] Failed to load history:", err);
     }
   }
+
+  // Modal logic
+  document.getElementById("cancel-delete-btn")?.addEventListener("click", () => {
+    sessionToDelete = null;
+    document.getElementById("delete-confirm-modal")?.classList.add("hidden");
+  });
+  document.getElementById("confirm-delete-btn")?.addEventListener("click", async () => {
+    if (sessionToDelete) {
+      await chrome.runtime.sendMessage({
+        type: "DELETE_SAVED_SESSION",
+        sessionId: sessionToDelete,
+      });
+      sessionToDelete = null;
+      document.getElementById("delete-confirm-modal")?.classList.add("hidden");
+      loadMeetingHistory();
+    }
+  });
 
   function generateSessionMarkdown(session: State): string {
     let md = `# Meeting Summary\n\n`;
@@ -1121,5 +1152,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     showToast("Downloaded as .md file", "success");
   }
 
+  // Load history on tab switch
+  document.querySelector('[data-tab="history"]')?.addEventListener("click", loadMeetingHistory);
   // Session loading is handled in the tab click listener now
 });

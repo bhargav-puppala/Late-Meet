@@ -5,6 +5,7 @@ import {
 } from "./participantDetection.ts";
 
 import { initTheme } from "./theme.js";
+import "./content.css";
 
 initTheme();
 
