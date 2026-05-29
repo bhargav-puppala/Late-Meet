@@ -186,11 +186,15 @@ async function postChunk(blob: Blob) {
   relay(`sending chunk — ${blob.size} bytes  mimeType=${mimeType}`);
 
   try {
-    await chrome.runtime.sendMessage({
+    const response = await chrome.runtime.sendMessage({
       type: "OFFSCREEN_AUDIO_CHUNK",
       audioBase64,
       mimeType,
     });
+
+    if (!response?.success) {
+      relay(`chunk rejected by background — ${response?.error || "unknown error"}`);
+    }
   } catch (err) {
     console.error("[LateMeet][offscreen] Failed to send chunk:", err);
   }
