@@ -30,6 +30,8 @@ function normalizeActionItem(input: unknown): ActionItem | null {
     task,
     owner: String(raw.owner ?? "").trim() || undefined,
     deadline: String(raw.deadline ?? "").trim() || undefined,
+    confidence: (raw as any).confidence,
+    isSpeculative: (raw as any).isSpeculative,
   } as ActionItem;
 }
 
@@ -453,6 +455,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Key Insights
     updateInsights(state.keyInsights);
 
+    updateUnresolvedDiscussions(state.unresolvedDiscussions);
+    updateContradictions(state.contradictions);
+
     // Topics Tab
     if (loadedTabs.has("topics")) updateTopics(state.topics);
 
@@ -491,7 +496,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ——— Key Insights ———
-  function updateInsights(insights: string[]) {
+  function updateInsights(insights: any[]) {
     const list = document.getElementById("dash-insights-list");
     if (!list) return;
     if (!insights || insights.length === 0) {
@@ -499,7 +504,55 @@ document.addEventListener("DOMContentLoaded", async () => {
         '<li class="empty-msg">Insights will appear as the conversation progresses</li>';
       return;
     }
-    list.innerHTML = insights.map((i) => `<li>${escapeHtml(i || "")}</li>`).join("");
+    list.innerHTML = insights
+      .filter((i) => i != null)
+      .map((i) => {
+        const text = typeof i === "string" ? i : i.text || "";
+        const rawScore =
+          typeof i === "object" && i !== null
+            ? (i as { confidenceScore?: unknown }).confidenceScore
+            : undefined;
+        const parsedScore = typeof rawScore === "number" ? rawScore : Number(rawScore);
+        const safeScore = Number.isFinite(parsedScore)
+          ? Math.max(0, Math.min(100, parsedScore))
+          : null;
+        const score =
+          safeScore !== null
+            ? ` <span style="font-size: 11px; color: #9ca3af;">(Conf: ${safeScore}%)</span>`
+            : "";
+        return `<li>${escapeHtml(text)}${score}</li>`;
+      })
+      .join("");
+  }
+
+  function updateUnresolvedDiscussions(discussions: string[]) {
+    const list = document.getElementById("dash-unresolved-list");
+    if (!list) return;
+    if (!discussions || discussions.length === 0) {
+      list.innerHTML = '<li class="empty-msg">No unresolved discussions yet</li>';
+      return;
+    }
+    list.innerHTML = discussions.map((d) => `<li>${escapeHtml(d || "")}</li>`).join("");
+  }
+
+  function updateContradictions(contradictions: any[]) {
+    const list = document.getElementById("dash-contradictions-list");
+    if (!list) return;
+    if (!contradictions || contradictions.length === 0) {
+      list.innerHTML = '<li class="empty-msg">No contradictions detected</li>';
+      return;
+    }
+    list.innerHTML = contradictions
+      .filter((c) => c != null)
+      .map((c) => {
+        const issue = typeof c === "string" ? c : c.issue || "";
+        const persists =
+          typeof c === "object" && c.persists
+            ? ` <span style="font-size: 11px; background: #FEE2E2; color: #DC2626; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">Persists</span>`
+            : "";
+        return `<li>${escapeHtml(issue)}${persists}</li>`;
+      })
+      .join("");
   }
 
   // ——— Topics ———
@@ -538,7 +591,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       .map(
         (d) => `
       <div class="decision-item">
-        <div class="decision-text">${escapeHtml(d.text || "")}</div>
+        <div class="decision-text">${escapeHtml(d.text || "")} ${d.classification === "tentative" ? '<span style="font-size: 11px; background: #FEF3C7; color: #D97706; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">Tentative</span>' : ""}</div>
         <div class="decision-meta">${d.by ? `By ${escapeHtml(d.by)}` : ""} ${d.timestamp ? `• ${escapeHtml(d.timestamp)}` : ""}</div>
       </div>
     `,
@@ -585,6 +638,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       const taskDiv = document.createElement("div");
       taskDiv.className = "action-task" + (done ? " action-task--done" : "");
       taskDiv.textContent = task;
+      if (a.isSpeculative) {
+        const specSpan = document.createElement("span");
+        specSpan.style.cssText =
+          "font-size: 11px; background: #FEE2E2; color: #DC2626; padding: 2px 6px; border-radius: 4px; margin-left: 6px;";
+        specSpan.textContent = "Speculative";
+        taskDiv.appendChild(specSpan);
+      }
+      if (a.confidence && a.confidence !== "high") {
+        const confSpan = document.createElement("span");
+        confSpan.style.cssText =
+          "font-size: 11px; background: #F3F4F6; color: #6B7280; padding: 2px 6px; border-radius: 4px; margin-left: 6px;";
+        confSpan.textContent = `Conf: ${a.confidence}`;
+        taskDiv.appendChild(confSpan);
+      }
       label.appendChild(taskDiv);
 
       if (owner) {
@@ -989,7 +1056,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function sanitizeTopicStatus(status: string) {
-    return status === "completed" ? "completed" : "active";
+    if (status === "completed") return "completed";
+    if (status === "unresolved") return "unresolved";
+    return "active";
   }
 
   function formatDuration(seconds: number) {

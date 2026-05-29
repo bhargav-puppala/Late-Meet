@@ -211,6 +211,8 @@ const state: State = {
   currentTopic: "",
   sentiment: "neutral",
   keyInsights: [],
+  unresolvedDiscussions: [],
+  contradictions: [],
   questionsRaised: [],
   participants: [],
   initialParticipants: [],
@@ -254,6 +256,8 @@ function resetState() {
   state.currentTopic = "";
   state.sentiment = "neutral";
   state.keyInsights = [];
+  state.unresolvedDiscussions = [];
+  state.contradictions = [];
   state.questionsRaised = [];
   state.participants = [];
   state.initialParticipants = [];
@@ -297,6 +301,8 @@ function snapshot() {
     currentTopic: state.currentTopic,
     sentiment: state.sentiment,
     keyInsights: state.keyInsights,
+    unresolvedDiscussions: state.unresolvedDiscussions,
+    contradictions: state.contradictions,
     questionsRaised: state.questionsRaised,
     participants: state.participants,
     initialParticipants: state.initialParticipants,
@@ -613,28 +619,37 @@ async function summarizeTranscriptIfNeeded() {
       '"summary": "Updated meeting summary..."',
       ...(topicDetectionEnabled
         ? [
-            '"topics": [{"name": "Topic", "status": "active|completed"}]',
+            '"topics": [{"name": "Topic", "status": "active|completed|unresolved"}]',
             '"currentTopic": "Identifying the current main topic"',
+            '"unresolvedDiscussions": ["unresolved topic 1", ...]',
           ]
         : []),
-      ...(decisionDetectionEnabled ? ['"decisions": ["Decision 1", ...]'] : []),
-      ...(actionExtractionEnabled ? ['"actionItems": ["Action 1", ...]'] : []),
+      ...(decisionDetectionEnabled
+        ? ['"decisions": [{"text": "Decision 1", "classification": "finalized|tentative"}]']
+        : []),
+      ...(actionExtractionEnabled
+        ? [
+            '"actionItems": [{"task": "Action 1", "confidence": "high|medium|low", "isSpeculative": false}]',
+          ]
+        : []),
       ...(sentimentAnalysisEnabled ? ['"sentiment": "positive|neutral|negative|mixed"'] : []),
-      '"keyInsights": ["Insight 1", ...]',
+      '"keyInsights": [{"text": "Insight 1", "confidenceScore": 85}, ...]',
+      '"contradictions": [{"issue": "Contradiction 1", "persists": true}]',
       '"questionsRaised": ["Question 1", ...]',
     ];
 
     const systemPrompt = `You are a World-Class Meeting Intelligence Engine. 
-Your goal is to extract high-fidelity insights from meeting transcripts.
+Your goal is to extract high-fidelity insights from meeting transcripts and apply Conversational Confidence Collapse Detection.
 
 OUTPUT GUIDELINES:
 - Provide a concise yet professional summary (business grade).
 - Extract only the fields requested by the user prompt.
-${topicDetectionEnabled ? "- Identify distinct topics and their statuses (active/completed)." : ""}
-${decisionDetectionEnabled ? "- Precisely capture decisions if mentioned." : ""}
-${actionExtractionEnabled ? "- Precisely capture action items with assignees if mentioned." : ""}
+${topicDetectionEnabled ? "- Identify distinct topics and their statuses (active/completed/unresolved)." : ""}
+${decisionDetectionEnabled ? "- Precisely capture decisions. Classify as 'tentative' if there are hedging phrases (maybe, probably), otherwise 'finalized'." : ""}
+${actionExtractionEnabled ? "- Precisely capture action items. Rate confidence (high/medium/low). Prevent speculative statements from appearing as confirmed by setting isSpeculative to true." : ""}
 ${sentimentAnalysisEnabled ? "- Detect the prevailing sentiment and emotional dynamics." : ""}
-- Extract "Key Insights" that go beyond a simple summary (strategic value).
+- Extract "Key Insights" with a confidenceScore (0-100) based on linguistic certainty.
+- Track contradiction persistence if someone disagrees or contradicts a previous point.
 - Track specific questions raised that remain unanswered.
 
 You must return ONLY a JSON object.`;
@@ -718,6 +733,12 @@ Return a JSON object with these exact keys:
     }
 
     state.keyInsights = Array.isArray(parsed.keyInsights) ? parsed.keyInsights : state.keyInsights;
+    state.unresolvedDiscussions = Array.isArray(parsed.unresolvedDiscussions)
+      ? parsed.unresolvedDiscussions
+      : state.unresolvedDiscussions;
+    state.contradictions = Array.isArray(parsed.contradictions)
+      ? parsed.contradictions
+      : state.contradictions;
     state.questionsRaised = Array.isArray(parsed.questionsRaised)
       ? parsed.questionsRaised
       : state.questionsRaised;

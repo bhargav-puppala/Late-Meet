@@ -2,7 +2,7 @@
 
 export interface Topic {
   name: string;
-  status: "active" | "completed";
+  status: "active" | "completed" | "unresolved";
   duration?: string;
   startTime?: string;
 }
@@ -23,12 +23,25 @@ export interface Decision {
   text: string;
   by?: string;
   timestamp?: string;
+  classification?: "tentative" | "finalized";
 }
 
 export interface ActionItem {
   task: string;
   owner?: string;
   deadline?: string;
+  confidence?: "high" | "medium" | "low";
+  isSpeculative?: boolean;
+}
+
+export interface KeyInsight {
+  text: string;
+  confidenceScore: number;
+}
+
+export interface Contradiction {
+  issue: string;
+  persists: boolean;
 }
 
 export interface State {
@@ -42,7 +55,9 @@ export interface State {
   actionItems: ActionItem[];
   currentTopic: string;
   sentiment: string;
-  keyInsights: string[];
+  keyInsights: KeyInsight[];
+  unresolvedDiscussions: string[];
+  contradictions: Contradiction[];
   questionsRaised: string[];
   participants: string[];
   initialParticipants: string[];
