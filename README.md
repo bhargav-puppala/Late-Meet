@@ -146,55 +146,63 @@ It uses **Chrome's native `tabCapture` API** to intercept audio without adding p
 
 <br/>
 
-<details>
-<summary><b>📊 Dashboard — Real-time intelligence panel</b></summary>
+<details open>
+<summary><b>🎬 Workflow Demo — End-to-End Walkthrough</b></summary>
 <br/>
 
 <div align="center">
-  <img src="https://github.com/shouri123/Late-Meet/raw/main/docs/dashboard_preview.png" alt="Late Meet real-time side-panel dashboard showing live transcription, action items, topics, and sentiment analysis" width="88%"/>
+  <img src="docs/assets/demo/late-meet-workflow.gif" alt="Late Meet end-to-end product workflow demo GIF" width="88%"/>
   <br/><br/>
-  <sub><i>Live side-panel dashboard — transcription, topics, action items, sentiment, and timeline. All rendered locally in-browser.</i></sub>
+  <sub><i>End-to-end workflow demo — Loading the unpacked extension in Chrome, configuring API keys, joining Google Meet, starting the Copilot, and viewing the live side-panel dashboard.</i></sub>
 </div>
 
 </details>
 
 <details>
-<summary><b>⚡ Late-Joiner Briefing — Catch up in seconds</b></summary>
+<summary><b>📊 Dashboard — Real-time Side Panel</b></summary>
 <br/>
 
-> When you join a meeting already in progress, Late Meet instantly generates a **private overlay** visible only to you — summarising decisions made, topics covered, and key speaker contributions.
->
-> 📸 **This screenshot is a great first contribution!** → [Issue #102](https://github.com/shouri123/Late-Meet/issues/102)
+<div align="center">
+  <img src="docs/assets/screenshots/dashboard-side-panel.png" alt="Late Meet real-time side-panel dashboard" width="88%"/>
+  <br/><br/>
+  <sub><i>Live side-panel dashboard showing transcription, topics, action items, sentiment analysis, and speaker timelines.</i></sub>
+</div>
 
 </details>
 
 <details>
-<summary><b>⚙️ Options Page — BYOK API key configuration</b></summary>
+<summary><b>⚡ Late-Joiner Briefing — Catch up Overlay</b></summary>
 <br/>
 
-> The Options page lets you securely enter your ElevenLabs and OpenAI API keys. They are stored in `chrome.storage.local` and **never leave your machine**.
->
-> 📸 **Contribute this screenshot!** → [Issue #102](https://github.com/shouri123/Late-Meet/issues/102)
+<div align="center">
+  <img src="docs/assets/screenshots/meet-start-copilot.png" alt="Start Copilot Google Meet overlay" width="88%"/>
+  <br/><br/>
+  <sub><i>Floating meeting copilot injected cleanly onto Google Meet. Join late -> catch up instantly without adding noisy bots.</i></sub>
+</div>
 
 </details>
 
 <details>
-<summary><b>🔌 Extension Popup — One-click controls</b></summary>
+<summary><b>⚙️ Options Page — BYOK Key Configuration</b></summary>
 <br/>
 
-> The popup provides a one-click **Start Copilot** action, a live recording duration timer, and quick access to the Options page.
->
-> 📸 **Contribute this screenshot!** → [Issue #102](https://github.com/shouri123/Late-Meet/issues/102)
+<div align="center">
+  <img src="docs/assets/screenshots/options.png" alt="Options page key configuration" width="88%"/>
+  <br/><br/>
+  <sub><i>Securely input your ElevenLabs and OpenAI API keys. Stored strictly in local browser storage — 100% private.</i></sub>
+</div>
 
 </details>
 
 <details>
-<summary><b>🎬 GIF — Install to first session walkthrough</b></summary>
+<summary><b>🔌 Extension Popup — Quick Action Control</b></summary>
 <br/>
 
-> A complete walkthrough GIF showing: install extension → enter API keys → join Meet → Start Copilot → Side Panel live.
->
-> 🎬 **Contribute this GIF!** → [Issue #102](https://github.com/shouri123/Late-Meet/issues/102) — highest-impact contribution available.
+<div align="center">
+  <img src="docs/assets/screenshots/popup.png" alt="Late Meet extension popup control" width="40%"/>
+  <br/><br/>
+  <sub><i>One-click Copilot control, live recording duration timer, and direct access to options.</i></sub>
+</div>
 
 </details>
 
