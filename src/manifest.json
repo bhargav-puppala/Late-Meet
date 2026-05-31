@@ -23,8 +23,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
-      "js": ["src/content.ts"],
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "src/content.ts"
+      ],
       "run_at": "document_idle"
     }
   ],
