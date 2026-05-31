@@ -424,6 +424,8 @@ npm run format       # Prettier auto-format
 npm run type-check   # TypeScript validation
 ```
 
+> **💡 For detailed development & debugging instructions**, see [**DEVELOPMENT.md**](DEVELOPMENT.md) — includes Chrome extension debugging guides, hot reload workflow, and common errors.
+
 ---
 
 ## 🔑 API Key Setup

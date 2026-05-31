@@ -280,6 +280,8 @@ If adding utilities or reusable logic:
 
 - add corresponding `.test.ts` files when applicable.
 
+> **🔧 For detailed extension debugging & Chrome DevTools guides**, see [**DEVELOPMENT.md**](DEVELOPMENT.md) — includes service worker debugging, content script inspection, hot reload workflow, and troubleshooting common errors.
+
 ---
 
 # Code Style Guidelines
