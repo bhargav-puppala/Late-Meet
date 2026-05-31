@@ -349,6 +349,7 @@ Late-Meet/
 ```
 
 ---
+
 ## ⚙️ Installation
 
 <div align="center">
@@ -356,6 +357,7 @@ Late-Meet/
 </div>
 
 ### Quick Install (For Regular Users)
+
 No coding or terminal required! Get the extension running in under a minute.
 
 1. Go to the [Releases page](https://github.com/shouri123/Late-Meet/releases) and download the latest `Late-Meet.zip` (or `dist.zip`) file.
@@ -368,14 +370,17 @@ No coding or terminal required! Get the extension running in under a minute.
 ---
 
 ### 💻 Developer Setup (For Contributors)
+
 Want to build from source or contribute to the codebase?
 
 **Prerequisites:**
-* Chrome 116+ (Native Side Panel API required)
-* Node.js v18+ (LTS recommended)
-* npm v9+ 
+
+- Chrome 116+ (Native Side Panel API required)
+- Node.js v18+ (LTS recommended)
+- npm v9+
 
 **① Clone the repository**
+
 ```bash
 git clone [https://github.com/shouri123/Late-Meet.git](https://github.com/shouri123/Late-Meet.git)
 cd Late-Meet
@@ -416,6 +421,7 @@ npm run type-check   # TypeScript validation
 ```
 
 ```
+
 ## 🔑 API Key Setup
 
 <div align="center">
