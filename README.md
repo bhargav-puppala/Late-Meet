@@ -632,15 +632,15 @@ git push origin feature/your-feature-name
 
 #### 🟢 Beginner — `level-1`
 
-_No open issues for this level right now! Stay tuned._
+*No open issues for this level right now! Stay tuned.*
 
 #### 🟡 Intermediate — `level-2`
 
-_No open issues for this level right now! Stay tuned._
+*No open issues for this level right now! Stay tuned.*
 
 #### 🔴 Advanced — `level-3`
 
-_No open issues for this level right now! Stay tuned._
+*No open issues for this level right now! Stay tuned.*
 
 </div>
 <!-- END_ISSUE_TABLES -->
